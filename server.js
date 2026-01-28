@@ -3,23 +3,23 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
-import cookieParser from "cookie-parser"; // ADICIONE
+import cookieParser from "cookie-parser";
 
+import { inicializarTracking, loadTracking } from "./src/services/tracking.js"; // <-- ADICIONE ISSO
+import { atualizarInventarioGitHub } from "./src/services/github.js";
 import authRoutes from "./src/routes/auth.js";
 import apiRoutes from "./src/routes/api.js";
 import webRoutes from "./src/routes/web.js";
-import { inicializarTracking } from "./src/services/tracking.js";
-import { atualizarInventarioGitHub } from "./src/services/github.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Middleware GLOBAL
+// Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser()); // ADICIONE AQUI
+app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "public")));
 
 // Inicialização
@@ -35,8 +35,8 @@ app.get("/", (req, res) => {
   res.redirect("/login");
 });
 
-// Sincronização inicial
-const tracking = loadTracking();
+// Pré-carregar inventário
+const tracking = loadTracking(); // <-- agora funciona!
 if (!tracking.inventario?.paginas?.length) {
   console.log('🔄 Pré-carregando inventário...');
   atualizarInventarioGitHub().catch(console.error);
