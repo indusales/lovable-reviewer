@@ -1,11 +1,3 @@
-// Se tiver user/pass configurado, exige auth
-if (process.env.DASHBOARD_USER && process.env.DASHBOARD_PASS) {
-  app.use('/dashboard', (req, res, next) => {
-    const auth = req.headers.authorization;
-    if (!auth) return res.status(401).send('Login necessário');
-    // ... validar usuario/senha
-  });
-}
 import "dotenv/config";
 import express from "express";
 import OpenAI from "openai";
@@ -13,12 +5,38 @@ import cors from "cors";
 import axios from "axios";
 import fs from "fs";
 
+// 1. CRIAR APP PRIMEIRO (antes de usar)
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// 2. AGORA SIM: Proteção do dashboard (se tiver senha configurada)
+if (process.env.DASHBOARD_USER && process.env.DASHBOARD_PASS) {
+  app.use('/dashboard', (req, res, next) => {
+    const auth = req.headers.authorization;
+    
+    if (!auth || !auth.startsWith('Basic ')) {
+      res.set('WWW-Authenticate', 'Basic realm="Dashboard"');
+      return res.status(401).send('Acesso negado. Login necessário.');
+    }
+    
+    const credentials = Buffer.from(auth.split(' ')[1], 'base64').toString().split(':');
+    const username = credentials[0];
+    const password = credentials[1];
+    
+    if (username === process.env.DASHBOARD_USER && password === process.env.DASHBOARD_PASS) {
+      next();
+    } else {
+      res.set('WWW-Authenticate', 'Basic realm="Dashboard"');
+      res.status(401).send('Credenciais inválidas.');
+    }
+  });
+}
+
+// ... resto do código (tracking, funções, rotas) permanece igual ...
 
 // =========================
 // TRACKING (Checklist)
@@ -56,13 +74,10 @@ function saveTracking(data) {
 }
 
 // =========================
-// GERADOR CORRIGIDO (Prompts curtos, comando direto)
+// GERADOR DE COMANDOS
 // =========================
 
 async function generateLovablePrompt(feature, fase, contexto) {
-  // CORREÇÃO: Gera prompts CURTOS (<80 palavras), diretos, sem floreios
-  // Estilo: "Crie X. Use Y. NÃO faça Z."
-  
   const response = await openai.chat.completions.create({
     model: "gpt-4o",
     messages: [
@@ -89,15 +104,15 @@ Agora gere o comando para:`
         content: `Feature: ${feature}\nContexto: ${contexto || 'nenhum'}\n\nGere comando CURTO (max 80 palavras) no estilo do exemplo acima.`
       }
     ],
-    max_tokens: 150,  // Força resposta curta (~100-120 palavras no máximo)
-    temperature: 0.0  // Zero criatividade, 100% diretividade
+    max_tokens: 150,
+    temperature: 0.0
   });
 
   return response.choices[0].message.content;
 }
 
 // =========================
-// DASHBOARD WEB (Interface)
+// ROTAS
 // =========================
 
 app.get("/dashboard", (req, res) => {
@@ -372,7 +387,6 @@ app.get("/dashboard", (req, res) => {
   `);
 });
 
-// APIs
 app.get("/api/tracking", (req, res) => {
   res.json(loadTracking());
 });
@@ -394,7 +408,6 @@ app.post("/architect", async (req, res) => {
     const { feature, fase, contexto } = req.body;
     const prompt = await generateLovablePrompt(feature, fase, contexto);
     
-    // Salvar
     const t = loadTracking();
     if (t.fases[fase]) {
       t.fases[fase].items.push({ 
@@ -411,10 +424,9 @@ app.post("/architect", async (req, res) => {
   }
 });
 
-// Webhooks (manter)
 app.post("/github-webhook", async (req, res) => {
   res.status(200).json({ ok: true });
-  // ... manter código de review automático aqui ...
+  // Manter código de review aqui se necessário
 });
 
 app.get("/", (req, res) => {
@@ -423,5 +435,5 @@ app.get("/", (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Architect (comandos diretos) rodando em ${PORT}`);
+  console.log(`🚀 Architect protegido rodando em ${PORT}`);
 });
