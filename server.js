@@ -4,6 +4,7 @@ import OpenAI from "openai";
 import cors from "cors";
 import axios from "axios";
 import fs from "fs";
+import path from "path";
 
 const app = express();
 app.use(express.json());
@@ -11,6 +12,13 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cors());
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// =========================
+// CONFIGURAÇÕES DE SEGURANÇA
+// =========================
+const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || "indusales2024";
+const SESSION_COOKIE_NAME = "indusales_session";
+const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 horas
 
 // =========================
 // TRACKING + BACKLOG
@@ -24,21 +32,23 @@ function initTracking() {
       inventario: {
         paginas: [],
         componentes: [],
+        apis: [],
         tabelas: [],
-        ultimo_commit: "",
-        atualizado_em: null
+        ultimo_commit: null,
+        atualizado_em: null,
+        stats: { total_arquivos: 0, linhas_codigo: 0 }
       },
-      backlog: [], // Fila de funcionalidades pendentes
+      backlog: [],
       fases: {
-        "1.1": { nome: "Autenticação e Hierarquia", items: [] },
-        "1.2": { nome: "Dashboards por Perfil", items: [] },
-        "1.3": { nome: "Workflow de Aprovações", items: [] },
-        "2.1": { nome: "Catálogo do Fabricante", items: [] },
-        "2.2": { nome: "Catálogo do Revendedor", items: [] },
-        "3.1": { nome: "Carrinho e Pedidos", items: [] },
-        "3.2": { nome: "Sistema de Fiado", items: [] },
-        "4.1": { nome: "CRM e Clientes", items: [] },
-        "4.2": { nome: "Notificações WhatsApp", items: [] }
+        "1.1": { nome: "Autenticação e Hierarquia", items: [], progresso: 0 },
+        "1.2": { nome: "Dashboards por Perfil", items: [], progresso: 0 },
+        "1.3": { nome: "Workflow de Aprovações", items: [], progresso: 0 },
+        "2.1": { nome: "Catálogo do Fabricante", items: [], progresso: 0 },
+        "2.2": { nome: "Catálogo do Revendedor", items: [], progresso: 0 },
+        "3.1": { nome: "Carrinho e Pedidos", items: [], progresso: 0 },
+        "3.2": { nome: "Sistema de Fiado", items: [], progresso: 0 },
+        "4.1": { nome: "CRM e Clientes", items: [], progresso: 0 },
+        "4.2": { nome: "Notificações WhatsApp", items: [], progresso: 0 }
       },
     }, null, 2));
   }
@@ -52,114 +62,146 @@ function loadTracking() {
 function saveTracking(data) {
   fs.writeFileSync(TRACKING_FILE, JSON.stringify(data, null, 2));
 }
+
 // =========================
-// INVENTÁRIO AUTOMÁTICO (GitHub) - COM LOGS DE DEBUG
+// INVENTÁRIO AUTOMÁTICO (GitHub) - VERSÃO CORRIGIDA
 // =========================
 async function atualizarInventarioGitHub() {
   try {
-    console.log("🔍 [DEBUG] Iniciando busca no GitHub...");
-    console.log("🔍 [DEBUG] Token existe:", !!process.env.GITHUB_TOKEN);
-    console.log("🔍 [DEBUG] Token (primeiros 10 chars):", process.env.GITHUB_TOKEN ? process.env.GITHUB_TOKEN.substring(0, 10) + "..." : "VAZIO");
-    
+    console.log("🔍 [GitHub] Iniciando scan do repositório...");
     const tracking = loadTracking();
     
-    // Testar primeiro se consegue acessar o repo
-    console.log("🔍 [DEBUG] Testando acesso ao repo...");
-    const repoCheck = await axios.get(
+    // 1. Verificar repositório e branch
+    const repoInfo = await axios.get(
       'https://api.github.com/repos/indusales/indusales-connect-sell',
-      { 
-        headers: { 
-          'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
-          'Accept': 'application/vnd.github+json',
-          'User-Agent': 'INDUSALES-App'
-        } 
-      }
+      { headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } }
     );
     
-    console.log("✅ [DEBUG] Repo acessível! Branch default:", repoCheck.data.default_branch);
-    const branch = repoCheck.data.default_branch || 'main'; // Pega a branch correta automaticamente
+    const defaultBranch = repoInfo.data.default_branch;
+    console.log(`✅ [GitHub] Repo acessível. Branch: ${defaultBranch}`);
     
-    // Buscar árvore de arquivos
-    console.log(`🔍 [DEBUG] Buscando árvore na branch: ${branch}`);
+    // 2. Buscar árvore completa
     const treeRes = await axios.get(
-      `https://api.github.com/repos/indusales/indusales-connect-sell/git/trees/${branch}?recursive=1`,
-      { 
-        headers: { 
-          'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
-          'Accept': 'application/vnd.github+json',
-          'User-Agent': 'INDUSALES-App'
-        } 
-      }
+      `https://api.github.com/repos/indusales/indusales-connect-sell/git/trees/${defaultBranch}?recursive=1`,
+      { headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } }
     );
     
-    const files = treeRes.data.tree;
-    console.log(`✅ [DEBUG] Total de arquivos encontrados: ${files.length}`);
+    const files = treeRes.data.tree.filter(f => f.type === 'blob');
+    console.log(`📁 [GitHub] Total de arquivos: ${files.length}`);
     
-    // Detectar páginas (app/, pages/, src/pages/)
-    const paginas = files
-      .filter(f => f.path.match(/\.(tsx|jsx|vue|html|ts|js)$/) && !f.path.includes('node_modules'))
+    // 3. Analisar estrutura (suporta Next.js 14 app/ e pages/)
+    const extensoesCodigo = ['.tsx', '.ts', '.jsx', '.js', '.json', '.sql'];
+    
+    const arquivosCodigo = files.filter(f => 
+      extensoesCodigo.some(ext => f.path.endsWith(ext)) &&
+      !f.path.includes('node_modules') &&
+      !f.path.includes('.next') &&
+      !f.path.includes('dist')
+    );
+    
+    // Detectar páginas (Next.js 13+ ou páginas antigas)
+    const paginas = arquivosCodigo
+      .filter(f => {
+        const p = f.path.toLowerCase();
+        return (
+          (p.includes('/app/') && (p.endsWith('.tsx') || p.endsWith('.ts'))) ||
+          (p.includes('/pages/') && (p.endsWith('.tsx') || p.endsWith('.ts'))) ||
+          p.includes('page.tsx') || 
+          p.includes('page.ts') ||
+          p.includes('route.ts') ||
+          p.includes('layout.tsx')
+        );
+      })
       .map(f => ({
         nome: f.path.split('/').pop(),
         caminho: f.path,
-        tipo: (f.path.match(/(app|pages|src\/pages)/) || f.path.includes('page')) ? 'página' : 'componente'
+        tipo: f.path.includes('page') ? 'page' : (f.path.includes('route') ? 'api' : 'layout'),
+        tamanho: f.size
       }));
-      
-    console.log(`✅ [DEBUG] Páginas detectadas: ${paginas.filter(p => p.tipo === 'página').length}`);
-    console.log(`✅ [DEBUG] Componentes detectados: ${paginas.filter(p => p.tipo === 'componente').length}`);
-      
-    // Detectar SQL
-    const sqlFiles = files.filter(f => f.path.endsWith('.sql'));
-    console.log(`✅ [DEBUG] Arquivos SQL: ${sqlFiles.length}`);
     
-    // Buscar último commit
-    const commitRes = await axios.get(
-      `https://api.github.com/repos/indusales/indusales-connect-sell/commits?per_page=1&sha=${branch}`,
-      { 
-        headers: { 
-          'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
-          'Accept': 'application/vnd.github+json',
-          'User-Agent': 'INDUSALES-App'
-        } 
-      }
+    // Detectar componentes React
+    const componentes = arquivosCodigo
+      .filter(f => {
+        const p = f.path.toLowerCase();
+        return (
+          (p.includes('/components/') || p.includes('/ui/')) &&
+          (p.endsWith('.tsx') || p.endsWith('.jsx')) &&
+          !p.includes('page') &&
+          !p.includes('layout')
+        );
+      })
+      .map(f => ({
+        nome: f.path.split('/').pop(),
+        caminho: f.path,
+        tamanho: f.size
+      }));
+    
+    // Detectar rotas API
+    const apis = arquivosCodigo
+      .filter(f => 
+        f.path.includes('/api/') || 
+        f.path.includes('/app/api/') ||
+        f.path.includes('/server/') ||
+        f.path.includes('/services/')
+      )
+      .map(f => ({
+        nome: f.path.split('/').pop(),
+        caminho: f.path,
+        tipo: f.path.includes('.sql') ? 'sql' : 'endpoint'
+      }));
+    
+    // SQL files
+    const sqlFiles = files.filter(f => 
+      f.path.endsWith('.sql') || 
+      f.path.includes('/migrations/') ||
+      f.path.includes('/schema/')
     );
     
-    const ultimoCommit = commitRes.data[0];
-    console.log("✅ [DEBUG] Último commit:", ultimoCommit?.commit?.message?.substring(0, 50));
+    // 4. Último commit
+    const commits = await axios.get(
+      `https://api.github.com/repos/indusales/indusales-connect-sell/commits?per_page=5&sha=${defaultBranch}`,
+      { headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } }
+    );
+    
+    const ultimoCommit = commits.data[0];
     
     tracking.inventario = {
-      paginas: paginas.filter(p => p.tipo === 'página'),
-      componentes: paginas.filter(p => p.tipo === 'componente'),
-      tabelas: sqlFiles.map(f => f.path),
-      branch_usada: branch,
-      total_arquivos: files.length,
+      paginas: paginas.slice(0, 50), // limitar para não sobrecarregar
+      componentes: componentes.slice(0, 30),
+      apis: apis.slice(0, 20),
+      tabelas: sqlFiles.map(f => ({ nome: f.path.split('/').pop(), caminho: f.path })),
       ultimo_commit: {
         mensagem: ultimoCommit?.commit?.message || "N/A",
-        data: ultimoCommit?.commit?.committer?.date || new Date().toISOString(),
-        autor: ultimoCommit?.commit?.committer?.name || "Desconhecido"
+        autor: ultimoCommit?.commit?.author?.name || "Desconhecido",
+        data: ultimoCommit?.commit?.author?.date,
+        sha: ultimoCommit?.sha?.substring(0, 7) || "N/A"
       },
+      stats: {
+        total_arquivos: files.length,
+        total_codigo: arquivosCodigo.length,
+        paginas: paginas.length,
+        componentes: componentes.length
+      },
+      branch: defaultBranch,
       atualizado_em: new Date().toISOString()
     };
     
     saveTracking(tracking);
-    console.log("✅ [DEBUG] Inventário salvo com sucesso!");
+    console.log(`✅ [GitHub] Inventário atualizado: ${paginas.length} páginas, ${componentes.length} componentes`);
     return tracking.inventario;
     
   } catch (error) {
-    console.error("❌ [DEBUG] ERRO COMPLETO:", error.message);
-    if (error.response) {
-      console.error("❌ [DEBUG] Status HTTP:", error.response.status);
-      console.error("❌ [DEBUG] Mensagem da API:", error.response.data?.message);
-      console.error("❌ [DEBUG] URL que falhou:", error.config?.url);
-    }
+    console.error("❌ [GitHub] Erro:", error.response?.status, error.response?.data?.message || error.message);
     return null;
   }
 }
+
 // =========================
-// GERADOR DE COMANDOS
+// GERADOR DE COMANDOS IA
 // =========================
 async function generateLovablePrompt(feature, fase, contexto, inventarioAtual) {
-  const contextoInventario = inventarioAtual ? 
-    `\nJÁ EXISTE NO PROJETO: ${inventarioAtual.paginas.map(p => p.caminho).join(', ')}` : '';
+  const contextoInventario = inventarioAtual?.paginas?.length ? 
+    `CONTEXTO ATUAL:\n- Páginas existentes: ${inventarioAtual.paginas.slice(0,5).map(p => p.caminho).join(', ')}\n- Último commit: ${inventarioAtual.ultimo_commit?.mensagem?.substring(0,50)}\n\n` : '';
     
   const response = await openai.chat.completions.create({
     model: "gpt-4o",
@@ -168,94 +210,85 @@ async function generateLovablePrompt(feature, fase, contexto, inventarioAtual) {
         role: "system",
         content: `Você é um gerador de comandos técnicos para Lovable. 
     
-REGRAS ABSOLUTAS:
-1. MÁXIMO 80 PALAVRAS (seja brutalmente conciso)
-2. Formato: "Ação. Componentes. Dados. NÃO faça."
-3. SEM explicações, SEM introduções, SEM conclusões
-4. Apenas o comando puro para copiar e colar
+REGRAS:
+1. Máximo 80 palavras. Brutalmente conciso.
+2. Formato: "Ação. Componentes shadcn: [lista]. Dados: [tabela/campos]. NÃO faça: [lista]."
+3. Foco em ${fase} do projeto INDUSALES (SaaS B2B industriais).
+4. Sem explicações, apenas o comando.
 
-ESTRUTURA OBRIGATÓRIA:
-Crie [página/componente]. Componentes shadcn: [lista]. Dados Supabase: [tabela/campos]. NÃO crie: [restrições].
-
-EXEMPLO PERFEITO:
-"Crie página /login. Componentes: Input email/senha, Button submit. Layout: centrado mobile-first. Dados: tabela profiles (email,role). NÃO crie: cadastro, recovery senha, navbar. Teste: submit redireciona /dashboard."
-
-Agora gere o comando para:`
+ESTRUTURA:
+Crie [feature]. Use [componentes]. Dados Supabase: [schema]. NÃO: [escopo negativo]. Teste: [validação].`
       },
       {
         role: "user",
-        content: `Feature: ${feature}\nContexto: ${contexto || 'nenhum'}${contextoInventario}\n\nGere comando CURTO (max 80 palavras) no estilo do exemplo acima.`
+        content: `${contextoInventario}Feature: ${feature}\nFase: ${fase}\nContexto adicional: ${contexto || 'nenhum'}`
       }
     ],
-    max_tokens: 150,
+    max_tokens: 200,
     temperature: 0.0
   });
 
-  return response.choices[0].message.content;
+  return response.choices[0].message.content.trim();
 }
 
 // =========================
-// ROTAS API
+// MIDDLEWARE DE AUTENTICAÇÃO
 // =========================
-
-// Inventário automático
-// ROTA DE DIAGNÓSTICO (temporária - pode remover depois de funcionar)
-app.get("/api/teste-github", async (req, res) => {
-  try {
-    console.log("🔍 Teste de conexão GitHub iniciado...");
-    
-    // Teste 1: Verificar se token existe
-    if (!process.env.GITHUB_TOKEN) {
-      return res.json({ erro: "TOKEN_VAZIO", mensagem: "GITHUB_TOKEN não configurado no Render" });
-    }
-    
-    // Teste 2: Verificar formato do token
-    if (!process.env.GITHUB_TOKEN.startsWith('ghp_') && !process.env.GITHUB_TOKEN.startsWith('github_pat_')) {
-      return res.json({ 
-        erro: "FORMATO_INVALIDO", 
-        mensagem: "Token não parece ser um GitHub token válido",
-        prefixo: process.env.GITHUB_TOKEN.substring(0, 10) + "..."
+function requireAuth(req, res, next) {
+  // Verifica query string (?key=SENHA) ou cookie
+  const senhaQuery = req.query.key || req.query.senha;
+  const senhaHeader = req.headers['x-api-key'];
+  const cookie = req.headers.cookie?.includes(`${SESSION_COOKIE_NAME}=authenticated`);
+  
+  if (senhaQuery === DASHBOARD_PASSWORD || senhaHeader === DASHBOARD_PASSWORD || cookie) {
+    // Seta cookie se veio por query/header pela primeira vez
+    if (!cookie && (senhaQuery === DASHBOARD_PASSWORD || senhaHeader === DASHBOARD_PASSWORD)) {
+      res.cookie(SESSION_COOKIE_NAME, 'authenticated', { 
+        maxAge: SESSION_DURATION,
+        httpOnly: true,
+        secure: true,
+        sameSite: 'strict'
       });
     }
-    
-    // Teste 3: Tentar acessar API
+    return next();
+  }
+  
+  // Se for rota API, retorna 401
+  if (req.path.startsWith('/api/')) {
+    return res.status(401).json({ error: "Não autorizado" });
+  }
+  
+  // Se for HTML, mostra tela de login
+  res.send(renderLoginPage());
+}
+
+// =========================
+// ROTAS API (Protegidas)
+// =========================
+
+// API Pública de teste (mantida para diagnóstico)
+app.get("/api/teste-github", async (req, res) => {
+  try {
     const teste = await axios.get(
       'https://api.github.com/repos/indusales/indusales-connect-sell',
-      { 
-        headers: { 
-          'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
-          'Accept': 'application/vnd.github+json'
-        } 
-      }
+      { headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } }
     );
-    
-    res.json({
-      sucesso: true,
-      repositorio: "indusales/indusales-connect-sell",
-      branch_default: teste.data.default_branch,
-      privado: teste.data.private,
-      token_funcionando: true,
-      mensagem: "Tudo certo! O token tem acesso ao repositório."
-    });
-    
+    res.json({ sucesso: true, repo: teste.data.full_name, branch: teste.data.default_branch });
   } catch (error) {
-    res.json({
-      sucesso: false,
-      erro: error.response?.status,
-      mensagem: error.response?.data?.message || error.message,
-      solucao: error.response?.status === 404 ? "Repositório não existe ou token sem acesso" : 
-               error.response?.status === 401 ? "Token inválido ou expirado" : "Erro desconhecido"
-    });
+    res.status(500).json({ erro: error.message });
   }
 });
+
+// APIs protegidas
+app.use(['/api/inventario', '/api/backlog', '/api/tracking', '/architect'], requireAuth);
+
 app.get("/api/inventario", async (req, res) => {
   const tracking = loadTracking();
-  
-  // Se tiver mais de 1 hora sem atualizar, busca do GitHub
   const ultimaAtualizacao = tracking.inventario?.atualizado_em;
-  const deveAtualizar = !ultimaAtualizacao || 
-    (new Date() - new Date(ultimaAtualizacao)) > (60 * 60 * 1000); // 1 hora
-    
+  const umaHora = 60 * 60 * 1000;
+  
+  const deveAtualizar = !ultimaAtualizacao || (new Date() - new Date(ultimaAtualizacao)) > umaHora;
+  
   if (deveAtualizar) {
     const inventario = await atualizarInventarioGitHub();
     res.json(inventario || tracking.inventario);
@@ -269,19 +302,19 @@ app.post("/api/inventario/refresh", async (req, res) => {
   res.json(inventario || { error: "Falha ao atualizar" });
 });
 
-// Backlog (Fila)
 app.get("/api/backlog", (req, res) => {
   const tracking = loadTracking();
   res.json(tracking.backlog || []);
 });
 
 app.post("/api/backlog/add", (req, res) => {
-  const { feature, fase, prioridade = "media" } = req.body;
+  const { feature, fase, prioridade = "media", descricao = "" } = req.body;
   const tracking = loadTracking();
   
   tracking.backlog.push({
-    id: Date.now(),
+    id: Date.now().toString(),
     feature,
+    descricao,
     fase,
     prioridade,
     status: "pendente",
@@ -299,6 +332,7 @@ app.post("/api/backlog/update", (req, res) => {
   const item = tracking.backlog.find(b => b.id === id);
   if (item) {
     item.status = status;
+    if (status === 'concluido') item.concluido_em = new Date().toISOString();
     saveTracking(tracking);
     res.json({ success: true });
   } else {
@@ -306,7 +340,6 @@ app.post("/api/backlog/update", (req, res) => {
   }
 });
 
-// Tracking (implementados)
 app.get("/api/tracking", (req, res) => {
   res.json(loadTracking());
 });
@@ -323,7 +356,6 @@ app.post("/api/tracking/update", (req, res) => {
   }
 });
 
-// Architect
 app.post("/architect", async (req, res) => {
   try {
     const { feature, fase, contexto } = req.body;
@@ -331,7 +363,6 @@ app.post("/architect", async (req, res) => {
     
     const prompt = await generateLovablePrompt(feature, fase, contexto, tracking.inventario);
     
-    // Marcar como "gerado" na fase
     if (tracking.fases[fase]) {
       tracking.fases[fase].items.push({ 
         nome: feature.substring(0, 50), 
@@ -341,566 +372,1211 @@ app.post("/architect", async (req, res) => {
     }
     
     saveTracking(tracking);
-    res.json({ prompt, custo: "1 crédito Lovable" });
+    res.json({ prompt, custo: "1 crédito" });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
 // =========================
-// DASHBOARD WEB
+// PÁGINAS WEB
 // =========================
-app.get("/dashboard", async (req, res) => {
-  res.send(`
+
+// Tela de Login
+function renderLoginPage(error = "") {
+  return `
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>INDUSALES - Gestão do Projeto</title>
+    <title>Login | INDUSALES Architect</title>
     <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+      
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { 
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-        color: #f1f5f9;
+      
+      body {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%);
         min-height: 100vh;
-        padding: 20px;
-      }
-      .container { max-width: 1400px; margin: 0 auto; }
-      h1 { color: #f59e0b; text-align: center; margin-bottom: 10px; font-size: 2rem; }
-      .subtitle { text-align: center; color: #94a3b8; margin-bottom: 30px; font-size: 14px; }
-      
-      .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
-      @media (max-width: 1200px) { .grid-3 { grid-template-columns: 1fr; } }
-      
-      .card {
-        background: rgba(30, 41, 59, 0.9);
-        border: 1px solid #334155;
-        border-radius: 12px;
-        padding: 20px;
-        max-height: 80vh;
-        overflow-y: auto;
-      }
-      .card h2 { 
-        color: #3b82f6; 
-        margin-bottom: 15px; 
-        font-size: 1.1rem;
         display: flex;
-        justify-content: space-between;
         align-items: center;
-      }
-      .refresh-btn {
-        font-size: 12px;
-        padding: 4px 8px;
-        background: #334155;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
+        justify-content: center;
+        color: #f8fafc;
+        overflow: hidden;
       }
       
-      /* Inventário */
-      .inventario-item {
-        background: rgba(15, 23, 42, 0.6);
-        padding: 10px;
-        margin-bottom: 8px;
-        border-radius: 6px;
-        font-size: 13px;
-        border-left: 3px solid #10b981;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-      .inventario-item small { color: #64748b; font-size: 11px; }
-      
-      /* Backlog */
-      .backlog-form {
-        margin-bottom: 15px;
-        padding-bottom: 15px;
-        border-bottom: 1px solid #334155;
-      }
-      .backlog-input {
-        width: 100%;
-        padding: 8px;
-        margin-bottom: 8px;
-        background: #0f172a;
-        border: 1px solid #475569;
-        border-radius: 4px;
-        color: #f1f5f9;
-      }
-      .backlog-select {
-        width: 48%;
-        padding: 8px;
-        background: #0f172a;
-        border: 1px solid #475569;
-        border-radius: 4px;
-        color: #f1f5f9;
-      }
-      .add-btn {
-        width: 100%;
-        padding: 8px;
-        margin-top: 8px;
-        background: #10b981;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-weight: bold;
+      .bg-grid {
+        position: absolute;
+        inset: 0;
+        background-image: 
+          linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+        background-size: 40px 40px;
+        pointer-events: none;
       }
       
-      .backlog-item {
-        background: rgba(15, 23, 42, 0.6);
-        padding: 12px;
-        margin-bottom: 8px;
-        border-radius: 6px;
-        border-left: 3px solid #f59e0b;
+      .login-container {
         position: relative;
-      }
-      .backlog-item.em-desenvolvimento { border-left-color: #3b82f6; }
-      .backlog-item.concluido { border-left-color: #10b981; opacity: 0.6; }
-      
-      .backlog-item strong { color: #f59e0b; font-size: 13px; }
-      .backlog-item small { display: block; color: #64748b; font-size: 11px; margin-top: 4px; }
-      
-      .backlog-actions {
-        margin-top: 8px;
-        display: flex;
-        gap: 5px;
-      }
-      .action-btn {
-        font-size: 11px;
-        padding: 4px 8px;
-        background: #334155;
-        color: white;
-        border: none;
-        border-radius: 3px;
-        cursor: pointer;
-      }
-      .action-btn:hover { background: #475569; }
-      .action-btn.gerar { background: #f59e0b; color: #0f172a; font-weight: bold; }
-      
-      /* Gerador */
-      .form-group { margin-bottom: 15px; }
-      label { display: block; margin-bottom: 5px; color: #cbd5e1; font-size: 13px; font-weight: 600; }
-      select, textarea {
+        background: rgba(30, 41, 59, 0.7);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 24px;
+        padding: 48px;
         width: 100%;
-        padding: 10px;
-        background: #0f172a;
-        border: 1px solid #475569;
-        border-radius: 6px;
-        color: #f1f5f9;
+        max-width: 420px;
+        margin: 20px;
+        box-shadow: 
+          0 25px 50px -12px rgba(0,0,0,0.5),
+          0 0 0 1px rgba(255,255,255,0.05) inset;
+      }
+      
+      .logo {
+        text-align: center;
+        margin-bottom: 32px;
+      }
+      
+      .logo-icon {
+        width: 64px;
+        height: 64px;
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        border-radius: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 28px;
+        margin-bottom: 16px;
+        box-shadow: 0 10px 25px -5px rgba(245,158,11,0.4);
+      }
+      
+      h1 {
+        font-size: 24px;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+        margin-bottom: 8px;
+      }
+      
+      .subtitle {
+        color: #94a3b8;
+        font-size: 14px;
+      }
+      
+      .form-group {
+        margin-bottom: 20px;
+      }
+      
+      label {
+        display: block;
+        margin-bottom: 8px;
         font-size: 13px;
-        font-family: inherit;
+        font-weight: 500;
+        color: #cbd5e1;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
       }
-      textarea { min-height: 80px; resize: vertical; }
       
-      .gerar-btn {
+      input[type="password"] {
         width: 100%;
-        padding: 12px;
+        padding: 14px 16px;
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 12px;
+        color: white;
+        font-size: 16px;
+        transition: all 0.2s;
+        outline: none;
+      }
+      
+      input[type="password"]:focus {
+        border-color: #f59e0b;
+        background: rgba(15, 23, 42, 0.8);
+        box-shadow: 0 0 0 3px rgba(245,158,11,0.1);
+      }
+      
+      button {
+        width: 100%;
+        padding: 14px;
         background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
         color: #0f172a;
         border: none;
-        border-radius: 6px;
-        font-weight: bold;
+        border-radius: 12px;
+        font-size: 15px;
+        font-weight: 600;
         cursor: pointer;
+        transition: all 0.2s;
+        box-shadow: 0 4px 6px -1px rgba(245,158,11,0.2);
       }
       
-      .result-box {
-        background: #0a0f1d;
-        border: 2px solid #334155;
+      button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 10px 20px -5px rgba(245,158,11,0.4);
+      }
+      
+      button:active {
+        transform: translateY(0);
+      }
+      
+      .error {
+        background: rgba(239,68,68,0.1);
+        border: 1px solid rgba(239,68,68,0.3);
+        color: #fca5a5;
+        padding: 12px;
         border-radius: 8px;
-        padding: 15px;
-        margin-top: 15px;
-        font-family: 'Courier New', monospace;
         font-size: 13px;
-        color: #e2e8f0;
-        position: relative;
-        white-space: pre-wrap;
+        margin-bottom: 20px;
+        display: ${error ? 'block' : 'none'};
       }
-      .copy-btn {
-        position: absolute;
-        top: 10px;
-        right: 10px;
-        padding: 6px 12px;
-        background: #f59e0b;
-        color: #0f172a;
-        border: none;
-        border-radius: 4px;
-        font-weight: bold;
-        cursor: pointer;
+      
+      .hint {
+        text-align: center;
+        margin-top: 24px;
         font-size: 12px;
-      }
-      
-      .hint { font-size: 11px; color: #64748b; margin-top: 5px; font-style: italic; }
-      
-      .status-prioridade { 
-        display: inline-block; 
-        padding: 2px 6px; 
-        border-radius: 3px; 
-        font-size: 10px; 
-        margin-left: 5px;
-      }
-      .prioridade-alta { background: #ef4444; color: white; }
-      .prioridade-media { background: #f59e0b; color: black; }
-      .prioridade-baixa { background: #64748b; color: white; }
-      
-      .loading {
-        display: none;
-        text-align: center;
-        padding: 20px;
-        color: #f59e0b;
-      }
-      .empty-state {
-        text-align: center;
-        padding: 30px;
         color: #64748b;
-        font-size: 13px;
+      }
+      
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
+      .login-container {
+        animation: fadeIn 0.5s ease-out;
       }
     </style>
 </head>
 <body>
-    <div class="container">
-      <h1>🏗️ INDUSALES Architect</h1>
-      <p class="subtitle">Inventário Automático + Fila de Desenvolvimento</p>
+    <div class="bg-grid"></div>
+    <div class="login-container">
+      <div class="logo">
+        <div class="logo-icon">🏗️</div>
+        <h1>INDUSALES Architect</h1>
+        <p class="subtitle">Gestão de Projeto e Inventário</p>
+      </div>
       
-      <div class="grid-3">
-        <!-- COLUNA 1: Inventário (O que existe) -->
-        <div class="card">
-          <h2>
-            📦 Inventário GitHub
-            <button class="refresh-btn" onclick="atualizarInventario()" title="Atualizar do GitHub">🔄</button>
-          </h2>
-          <div id="inventario-content">
-            <div class="loading">Carregando...</div>
-          </div>
+      <div class="error">${error}</div>
+      
+      <form method="POST" action="/login">
+        <div class="form-group">
+          <label>Senha de Acesso</label>
+          <input type="password" name="senha" placeholder="Digite a senha..." autofocus required>
         </div>
-        
-        <!-- COLUNA 2: Backlog (Fila) -->
-        <div class="card">
-          <h2>📋 Backlog (Fila)</h2>
-          
-          <div class="backlog-form">
-            <input type="text" id="novo-feature" class="backlog-input" placeholder="Nova funcionalidade..." />
-            <div style="display: flex; gap: 4%;">
-              <select id="novo-fase" class="backlog-select">
-                <option value="">Fase...</option>
-                <option value="1.1">1.1 Auth</option>
-                <option value="1.2">1.2 Dashboard</option>
-                <option value="1.3">1.3 Aprovações</option>
-                <option value="2.1">2.1 Catálogo</option>
-                <option value="2.2">2.2 Revendedor</option>
-                <option value="3.1">3.1 Pedidos</option>
-                <option value="3.2">3.2 Fiado</option>
-                <option value="4.1">4.1 CRM</option>
-                <option value="4.2">4.2 WhatsApp</option>
-              </select>
-              <select id="novo-prioridade" class="backlog-select">
-                <option value="alta">🔥 Alta</option>
-                <option value="media" selected>⚡ Média</option>
-                <option value="baixa">📌 Baixa</option>
-              </select>
-            </div>
-            <button class="add-btn" onclick="adicionarBacklog()">+ Adicionar à Fila</button>
-          </div>
-          
-          <div id="backlog-lista">
-            <!-- Preenchido via JS -->
-          </div>
-        </div>
-        
-        <!-- COLUNA 3: Gerador -->
-        <div class="card">
-          <h2>⚡ Gerar Comando</h2>
-          
-          <form id="cmdForm" onsubmit="gerarComando(event)">
-            <div class="form-group">
-              <label>Item da Fila ou Novo</label>
-              <select id="feature-select" onchange="preencherFeature()">
-                <option value="">-- Selecionar da fila --</option>
-                <option value="novo">✏️ Digitar manualmente</option>
-              </select>
-            </div>
-            
-            <div class="form-group">
-              <label>Descrição da Feature</label>
-              <textarea id="feature-text" placeholder="Selecione da fila ou digite aqui..." required></textarea>
-              <div class="hint">Máx 80 palavras. Seja específico.</div>
-            </div>
-            
-            <div class="form-group">
-              <label>Fase</label>
-              <select id="fase-select" required>
-                <option value="1.1">1.1 - Autenticação</option>
-                <option value="1.2">1.2 - Dashboards</option>
-                <option value="1.3">1.3 - Aprovações</option>
-                <option value="2.1">2.1 - Catálogo Fabricante</option>
-                <option value="2.2">2.2 - Catálogo Revendedor</option>
-                <option value="3.1">3.1 - Pedidos</option>
-                <option value="3.2">3.2 - Fiado</option>
-                <option value="4.1">4.1 - CRM</option>
-                <option value="4.2">4.2 - WhatsApp</option>
-              </select>
-            </div>
-            
-            <button type="submit" class="gerar-btn">🚀 Gerar Comando para Lovable</button>
-          </form>
-          
-          <div class="loading" id="loading">
-            <p>Gerando...</p>
-          </div>
-          
-          <div id="resultado" style="display:none;">
-            <div class="result-box" id="cmdText"></div>
-            <button class="copy-btn" onclick="copiar()">📋 Copiar</button>
-            <button onclick="marcarConcluido()" style="width:100%; margin-top:10px; padding:10px; background:#10b981; color:white; border:none; border-radius:4px; cursor:pointer;">
-              ✓ Marcar como Implementado
-            </button>
-          </div>
-        </div>
+        <button type="submit">Entrar no Dashboard</button>
+      </form>
+      
+      <p class="hint">Versão 4.0 • Ambiente Seguro</p>
+    </div>
+</body>
+</html>
+  `;
+}
+
+// Rota de login
+app.get("/", (req, res) => {
+  res.redirect('/dashboard');
+});
+
+app.get("/login", (req, res) => {
+  res.send(renderLoginPage());
+});
+
+app.post("/login", express.urlencoded({ extended: true }), (req, res) => {
+  if (req.body.senha === DASHBOARD_PASSWORD) {
+    res.cookie(SESSION_COOKIE_NAME, 'authenticated', { 
+      maxAge: SESSION_DURATION,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict'
+    });
+    res.redirect('/dashboard?key=' + DASHBOARD_PASSWORD);
+  } else {
+    res.send(renderLoginPage("Senha incorreta. Tente novamente."));
+  }
+});
+
+// Dashboard Principal (Protegido)
+app.get("/dashboard", requireAuth, async (req, res) => {
+  const tracking = loadTracking();
+  
+  // Força atualização se estiver vazio
+  if (!tracking.inventario.paginas?.length) {
+    await atualizarInventarioGitHub();
+  }
+  
+  res.send(renderDashboard(tracking, req.query.key));
+});
+
+function renderDashboard(tracking, sessionKey = "") {
+  const addQuery = sessionKey ? `?key=${sessionKey}` : '';
+  
+  return `
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard | INDUSALES Architect</title>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+      
+      :root {
+        --bg-primary: #0f172a;
+        --bg-secondary: #1e293b;
+        --bg-card: rgba(30, 41, 59, 0.6);
+        --border: rgba(255, 255, 255, 0.1);
+        --text-primary: #f8fafc;
+        --text-secondary: #94a3b8;
+        --accent: #f59e0b;
+        --accent-hover: #d97706;
+        --success: #10b981;
+        --warning: #f59e0b;
+        --danger: #ef4444;
+      }
+      
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      
+      body {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        background: linear-gradient(135deg, var(--bg-primary) 0%, #1e1b4b 100%);
+        color: var(--text-primary);
+        min-height: 100vh;
+        line-height: 1.6;
+      }
+      
+      /* Layout */
+      .app {
+        display: grid;
+        grid-template-columns: 260px 1fr;
+        min-height: 100vh;
+      }
+      
+      @media (max-width: 1024px) {
+        .app { grid-template-columns: 1fr; }
+        .sidebar { display: none; }
+      }
+      
+      /* Sidebar */
+      .sidebar {
+        background: rgba(15, 23, 42, 0.8);
+        border-right: 1px solid var(--border);
+        padding: 24px;
+        position: fixed;
+        height: 100vh;
+        width: 260px;
+        overflow-y: auto;
+        backdrop-filter: blur(10px);
+      }
+      
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 32px;
+        padding-bottom: 24px;
+        border-bottom: 1px solid var(--border);
+      }
+      
+      .brand-icon {
+        width: 40px;
+        height: 40px;
+        background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+      }
+      
+      .brand-text {
+        font-weight: 700;
+        font-size: 18px;
+        letter-spacing: -0.5px;
+      }
+      
+      .nav-section {
+        margin-bottom: 24px;
+      }
+      
+      .nav-title {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--text-secondary);
+        margin-bottom: 12px;
+        font-weight: 600;
+      }
+      
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        color: var(--text-secondary);
+        text-decoration: none;
+        font-size: 14px;
+        transition: all 0.2s;
+        margin-bottom: 4px;
+      }
+      
+      .nav-item:hover {
+        background: rgba(255,255,255,0.05);
+        color: var(--text-primary);
+      }
+      
+      .nav-item.active {
+        background: rgba(245,158,11,0.1);
+        color: var(--accent);
+      }
+      
+      /* Main Content */
+      .main {
+        margin-left: 260px;
+        padding: 32px;
+        max-width: 1400px;
+      }
+      
+      @media (max-width: 1024px) {
+        .main { margin-left: 0; }
+      }
+      
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 32px;
+      }
+      
+      .header h1 {
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+      }
+      
+      .header-stats {
+        display: flex;
+        gap: 16px;
+      }
+      
+      .stat-badge {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-size: 13px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        backdrop-filter: blur(10px);
+      }
+      
+      /* Grid */
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+        gap: 24px;
+        margin-bottom: 32px;
+      }
+      
+      @media (max-width: 768px) {
+        .grid { grid-template-columns: 1fr; }
+      }
+      
+      /* Cards */
+      .card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        overflow: hidden;
+        backdrop-filter: blur(10px);
+        transition: transform 0.2s, box-shadow 0.2s;
+      }
+      
+      .card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 20px 40px -15px rgba(0,0,0,0.4);
+      }
+      
+      .card-header {
+        padding: 20px 24px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      
+      .card-title {
+        font-size: 16px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      
+      .card-action {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      
+      .card-action:hover {
+        background: rgba(245,158,11,0.1);
+        color: var(--accent);
+        border-color: rgba(245,158,11,0.3);
+      }
+      
+      .card-body {
+        padding: 20px;
+        max-height: 500px;
+        overflow-y: auto;
+      }
+      
+      .empty-state {
+        text-align: center;
+        padding: 40px;
+        color: var(--text-secondary);
+        font-size: 14px;
+      }
+      
+      /* Items */
+      .inventario-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        background: rgba(15, 23, 42, 0.4);
+        border: 1px solid rgba(255,255,255,0.05);
+        border-radius: 10px;
+        margin-bottom: 8px;
+        transition: all 0.2s;
+        font-size: 13px;
+      }
+      
+      .inventario-item:hover {
+        background: rgba(15, 23, 42, 0.8);
+        border-color: rgba(245,158,11,0.2);
+      }
+      
+      .item-info {
+        display: flex;
+        flex-direction: column;
+      }
+      
+      .item-name {
+        font-weight: 500;
+        color: var(--text-primary);
+      }
+      
+      .item-path {
+        font-size: 11px;
+        color: var(--text-secondary);
+        font-family: 'Monaco', 'Menlo', monospace;
+        margin-top: 2px;
+      }
+      
+      .item-badge {
+        font-size: 10px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+      
+      .badge-page { background: rgba(59,130,246,0.15); color: #60a5fa; }
+      .badge-component { background: rgba(16,185,129,0.15); color: #34d399; }
+      .badge-api { background: rgba(245,158,11,0.15); color: #fbbf24; }
+      .badge-sql { background: rgba(139,92,246,0.15); color: #a78bfa; }
+      
+      /* Formulários */
+      .form-group {
+        margin-bottom: 16px;
+      }
+      
+      label {
+        display: block;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        margin-bottom: 6px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      
+      .input, .select, textarea {
+        width: 100%;
+        padding: 12px;
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: white;
+        font-size: 14px;
+        transition: all 0.2s;
+        font-family: inherit;
+      }
+      
+      .input:focus, .select:focus, textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(245,158,11,0.1);
+      }
+      
+      textarea {
+        resize: vertical;
+        min-height: 100px;
+      }
+      
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 12px 24px;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 14px;
+        border: none;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      
+      .btn-primary {
+        background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+        color: #0f172a;
+        box-shadow: 0 4px 12px rgba(245,158,11,0.3);
+      }
+      
+      .btn-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 20px rgba(245,158,11,0.4);
+      }
+      
+      .btn-secondary {
+        background: rgba(255,255,255,0.05);
+        color: white;
+        border: 1px solid var(--border);
+      }
+      
+      .btn-secondary:hover {
+        background: rgba(255,255,255,0.1);
+      }
+      
+      /* Resultado */
+      .result-box {
+        background: rgba(0,0,0,0.3);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+        margin-top: 20px;
+        font-family: 'Monaco', 'Menlo', monospace;
+        font-size: 13px;
+        line-height: 1.6;
+        position: relative;
+        color: #e2e8f0;
+      }
+      
+      .copy-btn {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        background: rgba(255,255,255,0.1);
+        border: 1px solid var(--border);
+        color: white;
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      
+      .copy-btn:hover {
+        background: var(--accent);
+        color: #0f172a;
+      }
+      
+      /* Backlog */
+      .backlog-item {
+        background: rgba(15, 23, 42, 0.4);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        transition: all 0.2s;
+      }
+      
+      .backlog-item:hover {
+        border-color: rgba(245,158,11,0.3);
+      }
+      
+      .backlog-item.developing {
+        border-left: 3px solid var(--accent);
+      }
+      
+      .backlog-item.done {
+        opacity: 0.6;
+        border-left: 3px solid var(--success);
+      }
+      
+      .priority {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 6px;
+      }
+      
+      .priority-alta { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+      .priority-media { background: var(--warning); }
+      .priority-baixa { background: var(--text-secondary); }
+      
+      .fase-badge {
+        font-size: 11px;
+        background: rgba(255,255,255,0.05);
+        padding: 4px 8px;
+        border-radius: 6px;
+        color: var(--text-secondary);
+      }
+      
+      /* Scrollbar */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      
+      ::-webkit-scrollbar-track {
+        background: rgba(255,255,255,0.05);
+        border-radius: 4px;
+      }
+      
+      ::-webkit-scrollbar-thumb {
+        background: rgba(255,255,255,0.2);
+        border-radius: 4px;
+      }
+      
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(255,255,255,0.3);
+      }
+      
+      /* Loading */
+      .loading-skeleton {
+        background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.05) 75%);
+        background-size: 200% 100%;
+        animation: loading 1.5s infinite;
+        border-radius: 4px;
+        height: 20px;
+        margin-bottom: 8px;
+      }
+      
+      @keyframes loading {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+      }
+      
+      /* Mobile */
+      .mobile-header {
+        display: none;
+        padding: 16px;
+        background: rgba(15, 23, 42, 0.9);
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        z-index: 100;
+      }
+      
+      @media (max-width: 1024px) {
+        .mobile-header { display: block; }
+      }
+    </style>
+</head>
+<body>
+    <div class="mobile-header">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-weight:700;">🏗️ INDUSALES</span>
+        <span style="font-size:12px; color:var(--text-secondary);">Architect v4.0</span>
       </div>
     </div>
     
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-icon">🏗️</div>
+          <div class="brand-text">INDUSALES</div>
+        </div>
+        
+        <nav>
+          <div class="nav-section">
+            <div class="nav-title">Menu</div>
+            <a href="#inventario" class="nav-item active" onclick="showTab('inventario')">
+              <i data-lucide="folder-tree" style="width:18px;"></i>
+              Inventário
+            </a>
+            <a href="#backlog" class="nav-item" onclick="showTab('backlog')">
+              <i data-lucide="list-todo" style="width:18px;"></i>
+              Backlog
+            </a>
+            <a href="#gerador" class="nav-item" onclick="showTab('gerador')">
+              <i data-lucide="zap" style="width:18px;"></i>
+              Gerador IA
+            </a>
+          </div>
+          
+          <div class="nav-section">
+            <div class="nav-title">Fases</div>
+            ${Object.entries(tracking.fases).map(([key, fase]) => `
+              <a href="/api/tracking${escapeHtml(addQuery)}" class="nav-item" style="font-size:13px; padding-left:20px;">
+                <span style="opacity:0.6;">${key}</span>
+                <span style="margin-left:auto; font-size:11px; opacity:0.6;">${fase.items.length}</span>
+              </a>
+            `).join('')}
+          </div>
+        </nav>
+        
+        <div style="margin-top:auto; padding-top:24px; border-top:1px solid var(--border);">
+          <div style="font-size:12px; color:var(--text-secondary);">
+            Última sync: <span id="last-sync">Carregando...</span>
+          </div>
+        </div>
+      </aside>
+      
+      <main class="main">
+        <div class="header">
+          <div>
+            <h1>Dashboard</h1>
+            <p style="color:var(--text-secondary); font-size:14px; margin-top:4px;">
+              Gerencie o desenvolvimento do INDUSALES v4.0
+            </p>
+          </div>
+          <div class="header-stats">
+            <div class="stat-badge">
+              <i data-lucide="git-commit" style="width:16px; width:16px;"></i>
+              <span id="commit-count">0 commits</span>
+            </div>
+            <div class="stat-badge">
+              <i data-lucide="file-code" style="width:16px;"></i>
+              <span id="file-count">0 arquivos</span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="grid">
+          <!-- INVENTÁRIO -->
+          <div class="card" id="tab-inventario" style="grid-column: span 1;">
+            <div class="card-header">
+              <div class="card-title">
+                <i data-lucide="folder-tree" style="width:18px; color:var(--accent);"></i>
+                Inventário GitHub
+              </div>
+              <button class="card-action" onclick="atualizarInventario()">
+                <i data-lucide="refresh-cw" style="width:14px; display:inline; vertical-align:middle; margin-right:4px;"></i>
+                Sync
+              </button>
+            </div>
+            <div class="card-body" id="inventario-content">
+              <div class="loading-skeleton" style="height:60px;"></div>
+              <div class="loading-skeleton" style="height:60px;"></div>
+              <div class="loading-skeleton" style="height:60px;"></div>
+            </div>
+          </div>
+          
+          <!-- BACKLOG -->
+          <div class="card" id="tab-backlog" style="grid-column: span 1;">
+            <div class="card-header">
+              <div class="card-title">
+                <i data-lucide="list-todo" style="width:18px; color:var(--success);"></i>
+                Fila de Desenvolvimento
+              </div>
+              <button class="card-action" onclick="document.getElementById('add-form').scrollIntoView({behavior:'smooth'})">
+                + Nova
+              </button>
+            </div>
+            <div class="card-body" id="backlog-content">
+              <div class="empty-state">Carregando backlog...</div>
+            </div>
+          </div>
+          
+          <!-- GERADOR IA -->
+          <div class="card" id="tab-gerador" style="grid-column: span 2;">
+            <div class="card-header">
+              <div class="card-title">
+                <i data-lucide="zap" style="width:18px; color:var(--warning);"></i>
+                Gerador de Comandos (Lovable)
+              </div>
+            </div>
+            <div class="card-body">
+              <form id="cmdForm" onsubmit="gerarComando(event)">
+                <div style="display:grid; grid-template-columns: 1fr 200px; gap:16px; margin-bottom:16px;">
+                  <div class="form-group" style="margin:0;">
+                    <label>Feature a desenvolver</label>
+                    <select id="backlog-select" class="select" onchange="preencherFromBacklog()">
+                      <option value="">Selecionar da fila...</option>
+                      <option value="custom" style="font-style:italic;">→ Digitar manualmente</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin:0;">
+                    <label>Fase do projeto</label>
+                    <select id="fase-select" class="select" required>
+                      ${Object.entries(tracking.fases).map(([key, val]) => 
+                        `<option value="${key}">${key} - ${val.nome}</option>`
+                      ).join('')}
+                    </select>
+                  </div>
+                </div>
+                
+                <div class="form-group" id="custom-input" style="display:none;">
+                  <label>Descrição detalhada</label>
+                  <textarea id="feature-text" placeholder="Descreva a funcionalidade em até 80 palavras..."></textarea>
+                </div>
+                
+                <button type="submit" class="btn btn-primary" style="width:100%;">
+                  <i data-lucide="sparkles" style="width:16px;"></i>
+                  Gerar Comando Otimizado
+                </button>
+              </form>
+              
+              <div id="resultado" style="display:none;">
+                <div class="result-box">
+                  <button class="copy-btn" onclick="copiarComando()">Copiar</button>
+                  <pre id="cmdText" style="margin:0; white-space:pre-wrap;"></pre>
+                </div>
+                <div style="display:flex; gap:12px; margin-top:16px;">
+                  <button class="btn btn-secondary" onclick="marcarConcluido()" style="flex:1;">
+                    <i data-lucide="check" style="width:16px;"></i>
+                    Marcar como Implementado
+                  </button>
+                  <button class="btn btn-secondary" onclick="novoComando()" style="flex:1;">
+                    Novo Comando
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    
     <script>
+      // Inicializar ícones
+      lucide.createIcons();
+      
       let currentCmd = "";
       let backlogData = [];
+      let inventarioData = null;
       
-      // Carregar inventário
-      async function carregarInventario() {
-        const r = await fetch('/api/inventario');
-        const data = await r.json();
+      // Carregar dados
+      async function loadData() {
+        await Promise.all([loadInventario(), loadBacklog()]);
+        lucide.createIcons();
+      }
+      
+      async function loadInventario() {
+        const res = await fetch('/api/inventario${addQuery}');
+        const data = await res.json();
+        inventarioData = data;
+        
+        document.getElementById('commit-count').textContent = (data.stats?.total_codigo || 0) + ' arquivos';
+        document.getElementById('file-count').textContent = (data.paginas?.length || 0) + ' páginas';
+        document.getElementById('last-sync').textContent = data.atualizado_em ? 
+          new Date(data.atualizado_em).toLocaleTimeString() : 'Nunca';
+        
         const div = document.getElementById('inventario-content');
         
-        if (!data || !data.paginas) {
-          div.innerHTML = '<div class="empty-state">Erro ao carregar inventário</div>';
+        if (!data.paginas || data.paginas.length === 0) {
+          div.innerHTML = '<div class="empty-state">Nenhum arquivo detectado. Clique em Sync para atualizar.</div>';
           return;
         }
+        
+        // Agrupar por pasta
+        const grupos = {};
+        data.paginas.forEach(p => {
+          const folder = p.caminho.split('/').slice(0, -1).join('/') || 'root';
+          if (!grupos[folder]) grupos[folder] = [];
+          grupos[folder].push(p);
+        });
         
         let html = '';
         
         // Último commit
         if (data.ultimo_commit) {
-          html += '<div style="background:rgba(59,130,246,0.1); padding:10px; border-radius:6px; margin-bottom:15px; font-size:12px;">';
-          html += '<strong style="color:#3b82f6;">📝 Último Commit:</strong><br/>';
-          html += data.ultimo_commit.mensagem.substring(0, 60) + '...<br/>';
-          html += '<small>' + new Date(data.ultimo_commit.data).toLocaleString() + '</small>';
+          html += '<div style="background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.2); padding:16px; border-radius:10px; margin-bottom:20px;">';
+          html += '<div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">';
+          html += '<i data-lucide="git-commit" style="width:16px; color:#60a5fa;"></i>';
+          html += '<span style="font-weight:600; font-size:13px;">Último commit</span>';
+          html += '</div>';
+          html += '<p style="font-size:13px; color:#94a3b8; margin:0; line-height:1.5;">';
+          html += '<strong style="color:#f59e0b;">' + data.ultimo_commit.sha + '</strong> • ';
+          html += data.ultimo_commit.mensagem.substring(0, 80) + '...<br>';
+          html += '<small>por ' + data.ultimo_commit.autor + ' • ' + new Date(data.ultimo_commit.data).toLocaleString() + '</small>';
+          html += '</p>';
           html += '</div>';
         }
         
-        // Páginas
-        if (data.paginas && data.paginas.length > 0) {
-          html += '<h3 style="color:#10b981; font-size:13px; margin:15px 0 10px;">📄 Páginas Detectadas</h3>';
-          data.paginas.forEach(p => {
+        // Lista de arquivos
+        Object.entries(grupos).slice(0, 5).forEach(([folder, items]) => {
+          html += '<div style="margin-bottom:20px;">';
+          html += '<div style="font-size:11px; text-transform:uppercase; color:var(--text-secondary); margin-bottom:8px; letter-spacing:1px;">' + folder + '</div>';
+          items.slice(0, 5).forEach(item => {
+            const tipo = item.tipo || 'page';
+            const badgeClass = tipo === 'page' ? 'badge-page' : (tipo === 'api' ? 'badge-api' : 'badge-component');
             html += '<div class="inventario-item">';
-            html += '<span>' + p.nome + '</span>';
-            html += '<small>' + (p.caminho.includes('page') ? 'page' : 'comp') + '</small>';
+            html += '<div class="item-info">';
+            html += '<span class="item-name">' + item.nome + '</span>';
+            html += '<span class="item-path">' + item.caminho + '</span>';
+            html += '</div>';
+            html += '<span class="item-badge ' + badgeClass + '">' + tipo + '</span>';
             html += '</div>';
           });
-        } else {
-          html += '<div class="empty-state">Nenhuma página detectada ainda</div>';
-        }
-        
-        // Componentes
-        if (data.componentes && data.componentes.length > 0) {
-          html += '<h3 style="color:#10b981; font-size:13px; margin:15px 0 10px;">🧩 Componentes</h3>';
-          html += '<div style="font-size:12px; color:#94a3b8;">';
-          html += data.componentes.slice(0, 5).map(c => c.nome).join(', ');
-          if (data.componentes.length > 5) html += ' +' + (data.componentes.length - 5) + ' mais';
+          if (items.length > 5) {
+            html += '<div style="text-align:center; padding:8px; font-size:12px; color:var(--text-secondary);">+' + (items.length - 5) + ' mais</div>';
+          }
           html += '</div>';
-        }
+        });
         
         div.innerHTML = html;
       }
       
-      // Atualizar inventário (forçar refresh)
-      async function atualizarInventario() {
-        document.getElementById('inventario-content').innerHTML = '<div class="loading">Atualizando...</div>';
-        const r = await fetch('/api/inventario/refresh', { method: 'POST' });
-        await carregarInventario();
-      }
-      
-      // Carregar backlog
-      async function carregarBacklog() {
-        const r = await fetch('/api/backlog');
-        backlogData = await r.json();
-        const div = document.getElementById('backlog-lista');
-        const select = document.getElementById('feature-select');
+      async function loadBacklog() {
+        const res = await fetch('/api/backlog${addQuery}');
+        const data = await res.json();
+        backlogData = data.filter(b => b.status !== 'concluido' && b.status !== 'cancelado');
         
-        // Limpar opções anteriores (exceto as 2 primeiras)
+        const div = document.getElementById('backlog-content');
+        const select = document.getElementById('backlog-select');
+        
+        // Limpar select (mantém as 2 primeiras)
         while (select.options.length > 2) {
           select.remove(2);
         }
         
         if (backlogData.length === 0) {
-          div.innerHTML = '<div class="empty-state">Fila vazia. Adicione itens acima!</div>';
+          div.innerHTML = '<div class="empty-state">Fila vazia. Adicione novas funcionalidades abaixo.</div>';
           return;
         }
         
         let html = '';
-        backlogData.filter(b => b.status !== 'concluido').forEach(item => {
-          const prioridadeClass = 'prioridade-' + item.prioridade;
-          const statusClass = item.status === 'em-desenvolvimento' ? 'em-desenvolvimento' : '';
+        backlogData.forEach(item => {
+          const statusClass = item.status === 'em-desenvolvimento' ? 'developing' : '';
+          const priorityClass = 'priority-' + item.prioridade;
           
           html += '<div class="backlog-item ' + statusClass + '">';
-          html += '<strong>' + item.feature.substring(0, 40) + '</strong>';
-          html += '<span class="status-prioridade ' + prioridadeClass + '">' + item.prioridade + '</span>';
-          html += '<small>Fase ' + item.fase + ' • ' + new Date(item.criado_em).toLocaleDateString() + '</small>';
-          html += '<div class="backlog-actions">';
-          html += '<button class="action-btn gerar" onclick="usarBacklog(' + item.id + ')">⚡ Gerar</button>';
-          if (item.status === 'pendente') {
-            html += '<button class="action-btn" onclick="atualizarStatus(' + item.id + ', \'em-desenvolvimento\')">▶️ Iniciar</button>';
-          }
-          html += '<button class="action-btn" onclick="removerBacklog(' + item.id + ')" style="background:#ef4444;">🗑️</button>';
+          html += '<div>';
+          html += '<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">';
+          html += '<span class="priority ' + priorityClass + '"></span>';
+          html += '<strong style="font-size:14px;">' + escapeHtml(item.feature.substring(0, 50)) + '</strong>';
           html += '</div>';
+          html += '<div style="display:flex; gap:8px; margin-top:6px;">';
+          html += '<span class="fase-badge">Fase ' + item.fase + '</span>';
+          if (item.status === 'em-desenvolvimento') {
+            html += '<span style="font-size:11px; color:var(--warning);">● Em desenvolvimento</span>';
+          }
+          html += '</div>';
+          html += '</div>';
+          html += '<button class="card-action" onclick="usarBacklog(' + item.id + ')">Usar</button>';
           html += '</div>';
           
           // Adicionar ao select
-          const option = document.createElement('option');
-          option.value = item.id;
-          option.text = '📋 ' + item.feature.substring(0, 30) + '...';
-          select.add(option);
+          const opt = document.createElement('option');
+          opt.value = item.id;
+          opt.text = item.feature.substring(0, 40);
+          select.add(opt);
         });
+        
+        // Form de adicionar
+        html += '<div id="add-form" style="margin-top:24px; padding-top:24px; border-top:1px solid var(--border);">';
+        html += '<div class="form-group">';
+        html += '<label>Adicionar à fila</label>';
+        html += '<input type="text" id="new-feature" class="input" placeholder="Nome da funcionalidade...">';
+        html += '</div>';
+        html += '<div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:16px;">';
+        html += '<select id="new-fase" class="select">${Object.keys(tracking.fases).map(k => '<option value="' + k + '">' + k + '</option>').join('')}</select>';
+        html += '<select id="new-priority" class="select"><option value="alta">🔥 Alta</option><option value="media" selected>⚡ Média</option><option value="baixa">📌 Baixa</option></select>';
+        html += '</div>';
+        html += '<button class="btn btn-secondary" onclick="addBacklog()" style="width:100%;">Adicionar à Fila</button>';
+        html += '</div>';
         
         div.innerHTML = html;
       }
       
-      // Adicionar à fila
-      async function adicionarBacklog() {
-        const feature = document.getElementById('novo-feature').value;
-        const fase = document.getElementById('novo-fase').value;
-        const prioridade = document.getElementById('novo-prioridade').value;
+      function preencherFromBacklog() {
+        const id = document.getElementById('backlog-select').value;
+        const customDiv = document.getElementById('custom-input');
         
-        if (!feature || !fase) {
-          alert('Preencha a funcionalidade e a fase!');
-          return;
+        if (id === 'custom') {
+          customDiv.style.display = 'block';
+          document.getElementById('feature-text').value = '';
+          document.getElementById('feature-text').focus();
+        } else if (id) {
+          customDiv.style.display = 'none';
+          const item = backlogData.find(b => b.id == id);
+          if (item) {
+            document.getElementById('fase-select').value = item.fase;
+          }
+        } else {
+          customDiv.style.display = 'none';
         }
+      }
+      
+      function usarBacklog(id) {
+        document.getElementById('backlog-select').value = id;
+        preencherFromBacklog();
+        document.getElementById('tab-gerador').scrollIntoView({ behavior: 'smooth' });
+      }
+      
+      async function addBacklog() {
+        const feature = document.getElementById('new-feature').value;
+        const fase = document.getElementById('new-fase').value;
+        const prioridade = document.getElementById('new-priority').value;
         
-        await fetch('/api/backlog/add', {
+        if (!feature) return alert('Digite o nome da funcionalidade');
+        
+        await fetch('/api/backlog/add${addQuery}', {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
           body: JSON.stringify({ feature, fase, prioridade })
         });
         
-        document.getElementById('novo-feature').value = '';
-        await carregarBacklog();
+        loadBacklog();
+        lucide.createIcons();
       }
       
-      // Usar item do backlog no gerador
-      function usarBacklog(id) {
-        const item = backlogData.find(b => b.id === id);
-        if (item) {
-          document.getElementById('feature-select').value = id;
-          preencherFeature();
-          
-          // Scroll para o gerador
-          document.querySelector('.card:last-child').scrollIntoView({ behavior: 'smooth' });
-        }
-      }
-      
-      function preencherFeature() {
-        const select = document.getElementById('feature-select');
-        const id = select.value;
-        
-        if (id === 'novo') {
-          document.getElementById('feature-text').value = '';
-          document.getElementById('feature-text').focus();
-        } else if (id) {
-          const item = backlogData.find(b => b.id == id);
-          if (item) {
-            document.getElementById('feature-text').value = item.feature;
-            document.getElementById('fase-select').value = item.fase;
-          }
-        }
-      }
-      
-      // Gerar comando
       async function gerarComando(e) {
         e.preventDefault();
-        document.getElementById('loading').style.display = 'block';
+        const btn = e.target.querySelector('button[type="submit"]');
+        btn.innerHTML = '<i data-lucide="loader-2" style="width:16px; animation:spin 1s linear infinite;"></i> Gerando...';
+        lucide.createIcons();
         
-        const feature = document.getElementById('feature-text').value;
+        const select = document.getElementById('backlog-select');
+        const id = select.value;
+        let feature;
+        
+        if (id === 'custom' || !id) {
+          feature = document.getElementById('feature-text').value;
+        } else {
+          const item = backlogData.find(b => b.id == id);
+          feature = item ? item.feature : document.getElementById('feature-text').value;
+        }
+        
         const fase = document.getElementById('fase-select').value;
         
-        const r = await fetch('/architect', {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ feature, fase })
-        });
-        
-        const d = await r.json();
-        currentCmd = d.prompt;
-        
-        document.getElementById('cmdText').textContent = d.prompt;
-        document.getElementById('resultado').style.display = 'block';
-        document.getElementById('loading').style.display = 'none';
+        try {
+          const res = await fetch('/architect${addQuery}', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ feature, fase })
+          });
+          
+          const data = await res.json();
+          currentCmd = data.prompt;
+          
+          document.getElementById('cmdText').textContent = data.prompt;
+          document.getElementById('resultado').style.display = 'block';
+          document.getElementById('resultado').scrollIntoView({ behavior: 'smooth' });
+        } catch (err) {
+          alert('Erro ao gerar comando');
+        } finally {
+          btn.innerHTML = '<i data-lucide="sparkles" style="width:16px;"></i> Gerar Comando Otimizado';
+          lucide.createIcons();
+        }
       }
       
-      function copiar() {
+      function copiarComando() {
         navigator.clipboard.writeText(currentCmd);
-        alert('Comando copiado! Cole no Lovable.');
+        const btn = document.querySelector('.copy-btn');
+        btn.textContent = 'Copiado!';
+        setTimeout(() => btn.textContent = 'Copiar', 2000);
+      }
+      
+      function novoComando() {
+        document.getElementById('resultado').style.display = 'none';
+        document.getElementById('cmdForm').reset();
+        document.getElementById('custom-input').style.display = 'none';
       }
       
       async function marcarConcluido() {
-        const select = document.getElementById('feature-select');
+        const select = document.getElementById('backlog-select');
         const id = select.value;
         
-        if (id && id !== 'novo') {
-          await atualizarStatus(id, 'concluido');
+        if (id && id !== 'custom') {
+          await fetch('/api/backlog/update${addQuery}', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ id, status: 'concluido' })
+          });
+          loadBacklog();
         }
         
-        // Também salvar no tracking da fase
-        const fase = document.getElementById('fase-select').value;
-        const feature = document.getElementById('feature-text').value;
-        
-        await fetch('/api/tracking/update', {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ fase, nome: feature, status: 'implementado' })
-        });
-        
-        await carregarBacklog();
+        novoComando();
         alert('✓ Marcado como implementado!');
+      }
+      
+      async function atualizarInventario() {
+        const div = document.getElementById('inventario-content');
+        div.innerHTML = '<div class="loading-skeleton" style="height:60px;"></div><div class="loading-skeleton" style="height:60px;"></div>';
         
-        // Limpar formulário
-        document.getElementById('cmdForm').reset();
-        document.getElementById('resultado').style.display = 'none';
+        await fetch('/api/inventario/refresh${addQuery}', { method: 'POST' });
+        await loadInventario();
+        lucide.createIcons();
       }
       
-      async function atualizarStatus(id, status) {
-        await fetch('/api/backlog/update', {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ id, status })
-        });
-        await carregarBacklog();
+      function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
       }
       
-      async function removerBacklog(id) {
-        if (confirm('Remover da fila?')) {
-          // Implementar delete se necessário, por agora apenas status 'cancelado'
-          await atualizarStatus(id, 'cancelado');
-        }
+      function showTab(tab) {
+        // Em mobile, scroll para a seção
+        document.getElementById('tab-' + tab).scrollIntoView({ behavior: 'smooth' });
+        
+        // Atualizar active state
+        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+        event.target.closest('.nav-item').classList.add('active');
       }
       
       // Inicializar
-      carregarInventario();
-      carregarBacklog();
+      loadData();
     </script>
-</body>
+    
+    <style>
+      @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    </style>
+  </body>
 </html>
-  `);
-});
+  `;
+}
 
-// Webhooks (manter existente)
-app.post("/github-webhook", async (req, res) => {
-  res.status(200).json({ ok: true });
-});
+// Helper para escapar HTML
+function escapeHtml(text) {
+  if (!text) return '';
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
 
-app.get("/", (req, res) => {
-  res.redirect('/dashboard');
-});
-
+// =========================
+// INICIALIZAÇÃO
+// =========================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Architect com Inventário + Backlog rodando em ${PORT}`);
+  console.log(`🚀 INDUSALES Architect v4.0 rodando na porta ${PORT}`);
+  console.log(`🔒 Dashboard protegido: http://localhost:${PORT}/login`);
+  console.log(`🔑 Senha: ${DASHBOARD_PASSWORD === 'indusales2024' ? 'indusales2024 (Padrão - ALTERE!)' : 'Configurada via ENV'}`);
+  
+  // Pré-carregar inventário se vazio
+  const tracking = loadTracking();
+  if (!tracking.inventario.paginas?.length) {
+    console.log('📦 Pré-carregando inventário...');
+    atualizarInventarioGitHub().catch(console.error);
+  }
 });
