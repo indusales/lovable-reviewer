@@ -33,21 +33,22 @@ const openai = new OpenAI({
 });
 
 /* =========================
-   Funções Auxiliares (lógica interna)
+   Funções Auxiliares
 ========================= */
 
-// Função interna: Realiza o review com OpenAI
+// Review genérico com OpenAI
 async function performReview(diff, context) {
-  if (!diff) {
-    throw new Error("diff é obrigatório");
+  if (!diff || diff.trim().length === 0) {
+    return { result: "Nenhuma alteração detectada no diff." };
   }
 
-  const response = await openai.responses.create({
-    model: "o3",
-    input: [
-      {
-        role: "system",
-        content: `
+  try {
+    const response = await openai.responses.create({
+      model: "o3",
+      input: [
+        {
+          role: "system",
+          content: `
 Você é um engenheiro de software sênior e gerente de projeto.
 
 Objetivos:
@@ -60,6 +61,7 @@ REGRAS IMPORTANTES:
 - Trabalhe APENAS sobre o diff recebido
 - NÃO reescreva código fora do diff
 - NÃO invente requisitos
+- Seja objetivo e técnico
 
 RETORNE ESTRITAMENTE NO FORMATO JSON:
 {
@@ -67,32 +69,35 @@ RETORNE ESTRITAMENTE NO FORMATO JSON:
   "observacoes": ["bullet curto"],
   "riscos": ["se houver"]
 }
-        `
-      },
-      {
-        role: "user",
-        content: `
+          `
+        },
+        {
+          role: "user",
+          content: `
 CONTEXTO:
 ${context || "N/A"}
 
 DIFF:
 ${diff}
-        `
-      }
-    ]
-  });
+          `
+        }
+      ]
+    });
 
-  const output = response.output?.[0]?.content?.[0]?.text || "";
-  return { result: output };
+    const output = response.output?.[0]?.content?.[0]?.text || "";
+    return { result: output };
+  } catch (error) {
+    console.error("Erro OpenAI:", error.message);
+    throw new Error("Falha ao gerar review com OpenAI");
+  }
 }
 
-// Função interna: Processa o PR completo (diff + comentário)
+// Review de Pull Request
 async function performPRReview(owner, repo, pull_number) {
   if (!owner || !repo || !pull_number) {
     throw new Error("owner, repo e pull_number são obrigatórios");
   }
 
-  // Buscar diff do PR
   const prUrl = `https://api.github.com/repos/${owner}/${repo}/pulls/${pull_number}`;
 
   const prResponse = await axios.get(prUrl, {
@@ -104,13 +109,16 @@ async function performPRReview(owner, repo, pull_number) {
 
   const diff = prResponse.data;
 
-  // Chamar review internamente (sem HTTP)
+  if (!diff) {
+    console.log("ℹ️ Nenhum diff no PR");
+    return { ok: true, commented: false, reason: "no_diff" };
+  }
+
   const reviewResult = await performReview(
     diff, 
     `PR #${pull_number} do repositório ${owner}/${repo}`
   );
 
-  // Postar comentário no PR
   await axios.post(
     `https://api.github.com/repos/${owner}/${repo}/issues/${pull_number}/comments`,
     {
@@ -126,18 +134,159 @@ ${reviewResult.result || "Sem observações."}`
     }
   );
 
-  console.log(`✅ Comentário postado no PR #${pull_number} de ${owner}/${repo}`);
+  console.log(`✅ Comentário postado no PR #${pull_number}`);
   return { ok: true, commented: true };
 }
 
+// NOVO: Review de Commit Direto (Push)
+async function performPushReview(owner, repo, commitSha) {
+  if (!owner || !repo || !commitSha) {
+    throw new Error("owner, repo e commitSha são obrigatórios");
+  }
+
+  try {
+    // Buscar diff do commit específico
+    const commitUrl = `https://api.github.com/repos/${owner}/${repo}/commits/${commitSha}`;
+    
+    const commitResponse = await axios.get(commitUrl, {
+      headers: {
+        Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+        Accept: "application/vnd.github.v3.diff"
+      }
+    });
+
+    const diff = commitResponse.data;
+
+    if (!diff || diff.trim().length === 0) {
+      console.log(`ℹ️ Commit ${commitSha.substring(0, 7)} sem alterações de código`);
+      return { ok: true, commented: false };
+    }
+
+    const reviewResult = await performReview(
+      diff, 
+      `Commit ${commitSha.substring(0, 7)} em ${owner}/${repo}`
+    );
+
+    // Comentar diretamente no commit
+    await axios.post(
+      `https://api.github.com/repos/${owner}/${repo}/commits/${commitSha}/comments`,
+      {
+        body: `🤖 **Code Review Automático (OpenAI o3)** - Commit direto
+
+${reviewResult.result || "Sem observações."}`
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+          Accept: "application/vnd.github.v3+json"
+        }
+      }
+    );
+
+    console.log(`✅ Comentário postado no commit ${commitSha.substring(0, 7)}`);
+    return { ok: true, commented: true };
+
+  } catch (error) {
+    console.error(`❌ Erro ao revisar commit ${commitSha}:`, error.response?.data || error.message);
+    throw error;
+  }
+}
+
 /* =========================
-   Routes HTTP (API Externa)
+   Routes HTTP
 ========================= */
 
-// Rota manual (para testes)
+// Health check
+app.get("/", (req, res) => {
+  res.json({ 
+    status: "online", 
+    service: "lovable-reviewer",
+    timestamp: new Date().toISOString(),
+    version: "2.0.0"
+  });
+});
+
+// Webhook principal do GitHub
+app.post("/github-webhook", async (req, res) => {
+  try {
+    const event = req.headers["x-github-event"];
+    
+    // Responde imediatamente ao GitHub (não bloquear)
+    res.status(200).json({ ok: true, received: event });
+    
+    console.log(`📥 Evento recebido: ${event}`);
+
+    // PROCESSAR PULL REQUEST
+    if (event === "pull_request") {
+      const action = req.body.action;
+      
+      if (!["opened", "synchronize", "reopened"].includes(action)) {
+        console.log(`⏩ Ignorando ação de PR: ${action}`);
+        return;
+      }
+
+      const pr = req.body.pull_request;
+      const owner = pr.base.repo.owner.login;
+      const repo = pr.base.repo.name;
+      const pull_number = pr.number;
+
+      console.log(`📌 Processando PR: ${owner}/${repo} #${pull_number} (${action})`);
+      
+      try {
+        await performPRReview(owner, repo, pull_number);
+      } catch (error) {
+        console.error("❌ Erro ao processar PR:", error.message);
+      }
+    }
+    
+    // PROCESSAR PUSH (Commit direto)
+    else if (event === "push") {
+      const ref = req.body.ref;
+      const owner = req.body.repository.owner.login;
+      const repo = req.body.repository.name;
+      
+      // Só processa push na main ou master (ignore branches de feature/PR)
+      if (!ref.includes('main') && !ref.includes('master')) {
+        console.log(`⏩ Ignorando push para branch: ${ref}`);
+        return;
+      }
+
+      const commits = req.body.commits;
+      
+      if (!commits || commits.length === 0) {
+        console.log("ℹ️ Push sem commits (possivelmente merge)");
+        return;
+      }
+
+      // Pega o último commit do push para revisar
+      const lastCommit = commits[commits.length - 1];
+      const commitSha = lastCommit.id;
+      
+      console.log(`📌 Processando Push: ${owner}/${repo} - ${commitSha.substring(0, 7)}`);
+      
+      try {
+        await performPushReview(owner, repo, commitSha);
+      } catch (error) {
+        console.error("❌ Erro ao processar Push:", error.message);
+      }
+    }
+    
+    else {
+      console.log(`⏩ Evento ignorado: ${event}`);
+    }
+
+  } catch (error) {
+    console.error("❌ Erro no webhook:", error);
+  }
+});
+
+// Rotas manuais (para testes)
 app.post("/review", async (req, res) => {
   try {
     const { diff, context } = req.body;
+    if (!diff) {
+      return res.status(400).json({ error: "diff é obrigatório" });
+    }
     const result = await performReview(diff, context);
     res.json(result);
   } catch (error) {
@@ -146,7 +295,6 @@ app.post("/review", async (req, res) => {
   }
 });
 
-// Rota manual (para testes)
 app.post("/review-pr", async (req, res) => {
   try {
     const { owner, repo, pull_number } = req.body;
@@ -158,57 +306,13 @@ app.post("/review-pr", async (req, res) => {
   }
 });
 
-// Webhook do GitHub
-app.post("/github-webhook", async (req, res) => {
-  try {
-    const event = req.headers["x-github-event"];
-
-    // Responde imediatamente ao GitHub (não esperar processamento)
-    res.status(200).json({ ok: true });
-
-    if (event !== "pull_request") {
-      return;
-    }
-
-    const action = req.body.action;
-
-    // Só reage a PR aberto ou atualizado
-    if (!["opened", "synchronize"].includes(action)) {
-      return;
-    }
-
-    const pr = req.body.pull_request;
-    const owner = pr.base.repo.owner.login;
-    const repo = pr.base.repo.name;
-    const pull_number = pr.number;
-
-    console.log(`📌 Webhook PR: ${owner}/${repo} #${pull_number} (${action})`);
-
-    // Processar diretamente (sem chamar localhost)
-    await performPRReview(owner, repo, pull_number);
-
-  } catch (error) {
-    console.error("Erro /github-webhook:", error);
-  }
-});
-
 /* =========================
-   Health Check (para o Render)
-========================= */
-app.get("/", (req, res) => {
-  res.json({ 
-    status: "online", 
-    service: "lovable-reviewer",
-    timestamp: new Date().toISOString()
-  });
-});
-
-/* =========================
-   Start (Correção para Render)
+   Start
 ========================= */
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(`🚀 API rodando na porta ${PORT}`);
   console.log(`📍 Health check: http://localhost:${PORT}/`);
+  console.log(`🔗 Webhook endpoint: http://localhost:${PORT}/github-webhook`);
 });
