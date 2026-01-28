@@ -1,10 +1,26 @@
+// Função global para navegação entre abas
+window.showTab = function(tab) {
+    document.querySelectorAll('.card[id^="tab-"]').forEach(el => el.style.display = 'none');
+    const tabElement = document.getElementById('tab-' + tab);
+    if (tabElement) tabElement.style.display = 'block';
+    
+    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+    if (event && event.currentTarget) event.currentTarget.classList.add('active');
+    
+    if (tab === 'plano' && typeof window.initPlanoProjeto === 'function') {
+        window.initPlanoProjeto();
+    }
+    
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+};
+
 // Estado global
 let backlogData = [];
 let inventarioData = null;
 let currentCommand = null;
 let currentBacklogId = null;
+let estruturaData = [];
 
-// Inicialização
 document.addEventListener('DOMContentLoaded', () => {
     lucide.createIcons();
     loadData();
@@ -15,7 +31,6 @@ async function loadData() {
     updateStats();
 }
 
-// Carregar Inventário
 async function loadInventario() {
     try {
         const res = await fetch('/api/inventario');
@@ -23,13 +38,11 @@ async function loadInventario() {
         inventarioData = data;
         
         const container = document.getElementById('inventario-list');
-        
         if (!data.paginas || data.paginas.length === 0) {
             container.innerHTML = '<div class="loading">Nenhum arquivo encontrado. Clique em Sync.</div>';
             return;
         }
         
-        // Agrupar por diretório
         const grupos = {};
         data.paginas.forEach(p => {
             const dir = p.caminho.split('/').slice(0, -1).join('/') || 'raiz';
@@ -72,22 +85,18 @@ async function loadInventario() {
         
         container.innerHTML = html;
         lucide.createIcons();
-        
     } catch (err) {
         console.error('Erro ao carregar inventário:', err);
     }
 }
 
-// Carregar Backlog
 async function loadBacklog() {
     try {
         const res = await fetch('/api/backlog');
         const data = await res.json();
         backlogData = data.filter(b => b.status !== 'concluido' && b.status !== 'cancelado');
-        
         renderBacklog();
         populateSelect();
-        
     } catch (err) {
         console.error('Erro ao carregar backlog:', err);
     }
@@ -96,19 +105,16 @@ async function loadBacklog() {
 function renderBacklog() {
     const container = document.getElementById('backlog-list');
     const select = document.getElementById('select-backlog');
-    
-    // Limpar opções mantendo as 2 primeiras
     while (select.options.length > 2) select.remove(2);
     
     if (backlogData.length === 0) {
-        container.innerHTML = '<div class="loading">Nenhuma tarefa na fila. Clique em "+ Novo" para adicionar.</div>';
+        container.innerHTML = '<div class="loading">Nenhuma tarefa na fila.</div>';
         return;
     }
     
     let html = '';
     backlogData.forEach(item => {
         const pClass = item.prioridade === 'alta' ? 'p-alta' : (item.prioridade === 'media' ? 'p-media' : 'p-baixa');
-        
         html += `
             <div class="backlog-item">
                 <div>
@@ -124,20 +130,15 @@ function renderBacklog() {
                 <button class="btn btn-sm btn-secondary" onclick="usarBacklog('${item.id}')">Usar</button>
             </div>
         `;
-        
-        // Adicionar ao select
         const opt = document.createElement('option');
         opt.value = item.id;
         opt.text = item.feature.substring(0, 35);
         select.add(opt);
     });
-    
     container.innerHTML = html;
 }
 
-function populateSelect() {
-    // Já feito em renderBacklog
-}
+function populateSelect() {}
 
 function handleBacklogChange() {
     const id = document.getElementById('select-backlog').value;
@@ -164,7 +165,6 @@ function usarBacklog(id) {
     document.getElementById('gerador').scrollIntoView({ behavior: 'smooth' });
 }
 
-// Gerar Comando
 async function gerarComando(e) {
     e.preventDefault();
     const btn = e.target.querySelector('button[type="submit"]');
@@ -172,16 +172,10 @@ async function gerarComando(e) {
     btn.innerHTML = '<i data-lucide="loader-2" class="animate-spin"></i> Gerando...';
     lucide.createIcons();
     
-    const backlogSelect = document.getElementById('select-backlog');
-    const id = backlogSelect.value;
-    let feature;
-    
-    if (id === 'custom' || !id) {
-        feature = document.getElementById('feature-desc').value;
-    } else {
-        const item = backlogData.find(b => b.id === id);
-        feature = item ? item.feature : document.getElementById('feature-desc').value;
-    }
+    const id = document.getElementById('select-backlog').value;
+    let feature = (id === 'custom' || !id) 
+        ? document.getElementById('feature-desc').value 
+        : (backlogData.find(b => b.id === id)?.feature || document.getElementById('feature-desc').value);
     
     const fase = document.getElementById('select-fase').value;
     
@@ -191,14 +185,10 @@ async function gerarComando(e) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ feature, fase })
         });
-        
         const data = await res.json();
         currentCommand = data.prompt;
-        
         document.getElementById('comando-texto').textContent = data.prompt;
         document.getElementById('resultado').style.display = 'block';
-        document.getElementById('resultado').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        
     } catch (err) {
         alert('Erro ao gerar comando');
     } finally {
@@ -226,23 +216,18 @@ function novoComando() {
 }
 
 async function marcarConcluido() {
-    if (!currentBacklogId) {
-        novoComando();
-        return;
+    if (currentBacklogId) {
+        await fetch('/api/backlog/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: currentBacklogId, status: 'concluido' })
+        });
+        await loadBacklog();
     }
-    
-    await fetch('/api/backlog/update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: currentBacklogId, status: 'concluido' })
-    });
-    
-    await loadBacklog();
     novoComando();
     showToast('Tarefa marcada como concluída!');
 }
 
-// Modal
 function openAddModal() {
     document.getElementById('modal-add').classList.add('active');
 }
@@ -262,23 +247,19 @@ async function addToBacklog(e) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ feature, fase, prioridade })
     });
-    
     closeModal();
     e.target.reset();
     await loadBacklog();
     showToast('Adicionado à fila!');
 }
 
-// Sync
 async function syncGitHub() {
     const btn = document.querySelector('.btn-outline');
     btn.innerHTML = '<i data-lucide="loader-2" class="animate-spin"></i> Sincronizando...';
     lucide.createIcons();
-    
     await fetch('/api/inventario/refresh', { method: 'POST' });
     await loadInventario();
     updateStats();
-    
     btn.innerHTML = '<i data-lucide="refresh-cw"></i> Sync GitHub';
     lucide.createIcons();
     showToast('Inventário atualizado!');
@@ -299,7 +280,6 @@ function scrollToSection(id) {
 }
 
 function showToast(msg) {
-    // Implementação simples de toast
     const toast = document.createElement('div');
     toast.style.cssText = 'position:fixed; bottom:24px; right:24px; background:#10b981; color:white; padding:12px 24px; border-radius:8px; font-weight:500; z-index:9999; animation:fadeIn 0.3s;';
     toast.textContent = msg;
@@ -307,7 +287,6 @@ function showToast(msg) {
     setTimeout(() => toast.remove(), 3000);
 }
 
-// Animação CSS
 const style = document.createElement('style');
 style.textContent = `
     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -315,8 +294,19 @@ style.textContent = `
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 `;
 document.head.appendChild(style);
-// ===== PLANO DE PROJETO (Árvore Hierárquica) =====
-let estruturaData = [];
+
+// ===== PLANO DE PROJETO =====
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+window.initPlanoProjeto = function() {
+    carregarEstrutura();
+};
 
 async function carregarEstrutura() {
     try {
@@ -324,7 +314,7 @@ async function carregarEstrutura() {
         estruturaData = await res.json();
         renderArvore();
     } catch (e) {
-        console.error('Erro ao carregar estrutura:', e);
+        console.error('Erro:', e);
         document.getElementById('arvore-container').innerHTML = 'Erro ao carregar.';
     }
 }
@@ -333,84 +323,39 @@ function renderArvore() {
     const container = document.getElementById('arvore-container');
     if (!container) return;
     container.innerHTML = buildTreeHTML(estruturaData, 0);
+    lucide.createIcons();
 }
 
 function buildTreeHTML(nos, nivel) {
     if (!nos || nos.length === 0) return '';
-    
-    const indent = nivel * 24; // Indentação em pixels
+    const indent = nivel * 24;
     let html = `<ul style="list-style:none;padding:0;margin:0;">`;
     
-    nos.forEach((no, index) => {
+    nos.forEach(no => {
         const temFilhos = no.filhos && no.filhos.length > 0;
         const corCheckbox = no.concluido ? '#10b981' : 'transparent';
         const textDecoration = no.concluido ? 'line-through' : 'none';
         const opacity = no.concluido ? '0.6' : '1';
         
         html += `
-            <li style="margin:4px 0;position:relative;">
-                <div style="
-                    display:flex;
-                    align-items:center;
-                    gap:8px;
-                    padding:8px 12px;
-                    margin-left:${indent}px;
-                    background:rgba(255,255,255,0.03);
-                    border:1px solid rgba(255,255,255,0.1);
-                    border-radius:8px;
-                    transition:all 0.2s;
-                    opacity:${opacity};
-                " onmouseover="this.style.background='rgba(255,255,255,0.08)'" 
-                   onmouseout="this.style.background='rgba(255,255,255,0.03)'">
-                    
-                    <!-- Expandir/Colapsar -->
-                    ${temFilhos ? `
-                        <button onclick="toggleExpandido('${no.id}')" 
-                                style="background:none;border:none;color:#64748b;cursor:pointer;padding:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:4px;transition:0.2s;">
-                            <span style="transform:${no.expandido ? 'rotate(90deg)' : 'rotate(0deg)'};transition:transform 0.2s;">▶</span>
-                        </button>
-                    ` : '<span style="width:24px;"></span>'}
-                    
-                    <!-- Checkbox -->
-                    <div onclick="toggleConcluido('${no.id}')" 
-                         style="width:18px;height:18px;border:2px solid #475569;border-radius:4px;cursor:pointer;background:${corCheckbox};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                        ${no.concluido ? '<i data-lucide="check" style="width:12px;color:white;"></i>' : ''}
-                    </div>
-                    
-                    <!-- Título editável -->
-                    <span onclick="editarTitulo('${no.id}')" 
-                          style="flex:1;cursor:text;text-decoration:${textDecoration};color:${no.concluido ? '#94a3b8' : '#f1f5f9'};font-weight:${nivel === 0 ? '600' : (nivel === 1 ? '500' : '400')};font-size:${nivel === 0 ? '15px' : (nivel === 1 ? '14px' : '13px')};">
-                        ${escapeHtml(no.titulo)}
-                    </span>
-                    
-                    <!-- Ações -->
+            <li style="margin:4px 0;">
+                <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;margin-left:${indent}px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:8px;opacity:${opacity};" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='rgba(255,255,255,0.03)'">
+                    ${temFilhos ? `<button onclick="toggleExpandido('${no.id}')" style="background:none;border:none;color:#64748b;cursor:pointer;padding:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;"><span style="transform:${no.expandido ? 'rotate(90deg)' : 'rotate(0deg)'};transition:transform 0.2s;display:inline-block;">▶</span></button>` : '<span style="width:24px;"></span>'}
+                    <div onclick="toggleConcluido('${no.id}')" style="width:18px;height:18px;border:2px solid #475569;border-radius:4px;cursor:pointer;background:${corCheckbox};display:flex;align-items:center;justify-content:center;flex-shrink:0;">${no.concluido ? '<i data-lucide="check" style="width:12px;color:white;"></i>' : ''}</div>
+                    <span onclick="editarTitulo('${no.id}')" style="flex:1;cursor:text;text-decoration:${textDecoration};color:${no.concluido ? '#94a3b8' : '#f1f5f9'};font-weight:${nivel === 0 ? '600' : '400'};font-size:${nivel === 0 ? '15px' : '13px'};">${escapeHtml(no.titulo)}</span>
                     <div style="display:flex;gap:4px;opacity:0;transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0">
-                        <button onclick="adicionarFilho('${no.id}')" class="btn btn-sm" style="padding:4px 8px;font-size:11px;" title="Adicionar subtarefa">
-                            <i data-lucide="plus" style="width:12px;"></i>
-                        </button>
-                        <button onclick="removerNo('${no.id}')" class="btn btn-sm" style="padding:4px 8px;font-size:11px;background:rgba(239,68,68,0.2);color:#fca5a5;" title="Remover">
-                            <i data-lucide="trash-2" style="width:12px;"></i>
-                        </button>
+                        <button onclick="adicionarFilho('${no.id}')" class="btn btn-sm" style="padding:4px 8px;font-size:11px;"><i data-lucide="plus" style="width:12px;"></i></button>
+                        <button onclick="removerNo('${no.id}')" class="btn btn-sm" style="padding:4px 8px;font-size:11px;background:rgba(239,68,68,0.2);color:#fca5a5;"><i data-lucide="trash-2" style="width:12px;"></i></button>
                     </div>
                 </div>
-                
-                <!-- Filhos recursivos -->
                 ${(temFilhos && no.expandido) ? buildTreeHTML(no.filhos, nivel + 1) : ''}
             </li>
         `;
     });
     
-    // Botão adicionar no nível raiz (apenas no nível 0)
     if (nivel === 0) {
-        html += `
-            <li style="margin-top:12px;margin-left:${indent}px;">
-                <button onclick="adicionarRaiz()" class="btn btn-secondary" style="width:100%;padding:10px;border-style:dashed;">
-                    <i data-lucide="plus" style="width:14px;"></i> Adicionar Tarefa Principal
-                </button>
-            </li>
-        `;
+        html += `<li style="margin-top:12px;margin-left:${indent}px;"><button onclick="adicionarRaiz()" class="btn btn-secondary" style="width:100%;padding:10px;border-style:dashed;"><i data-lucide="plus" style="width:14px;"></i> Adicionar Tarefa Principal</button></li>`;
     }
-    
     html += `</ul>`;
     return html;
 }
@@ -449,25 +394,13 @@ function toggleConcluido(id) {
     const no = findNo(estruturaData, id);
     if (no) {
         no.concluido = !no.concluido;
-        // Recursivamente marca/desmarca filhos?
-        // marcarFilhos(no, no.concluido);
         renderArvore();
-    }
-}
-
-function marcarFilhos(no, valor) {
-    if (no.filhos) {
-        no.filhos.forEach(f => {
-            f.concluido = valor;
-            marcarFilhos(f, valor);
-        });
     }
 }
 
 function editarTitulo(id) {
     const no = findNo(estruturaData, id);
     if (!no) return;
-    
     const novo = prompt('Editar tarefa:', no.titulo);
     if (novo !== null && novo.trim() !== '') {
         no.titulo = novo.trim();
@@ -478,9 +411,7 @@ function editarTitulo(id) {
 function adicionarFilho(parentId) {
     const parent = findNo(estruturaData, parentId);
     if (!parent) return;
-    
     if (!parent.filhos) parent.filhos = [];
-    
     const novoId = `${parentId}.${parent.filhos.length + 1}`;
     const titulo = prompt('Nome da nova subtarefa:');
     if (titulo && titulo.trim()) {
@@ -491,7 +422,7 @@ function adicionarFilho(parentId) {
             expandido: false,
             filhos: []
         });
-        parent.expandido = true; // Auto-expande
+        parent.expandido = true;
         renderArvore();
     }
 }
@@ -512,9 +443,7 @@ function adicionarRaiz() {
 }
 
 function removerNo(id) {
-    if (!confirm('Tem certeza que deseja remover esta tarefa e todas as subtarefas?')) return;
-    
-    // Remove do array pai
+    if (!confirm('Tem certeza que deseja remover esta tarefa?')) return;
     function removeRec(nos, id) {
         const idx = nos.findIndex(n => n.id === id);
         if (idx !== -1) {
@@ -526,7 +455,6 @@ function removerNo(id) {
         }
         return false;
     }
-    
     removeRec(estruturaData, id);
     renderArvore();
 }
@@ -538,14 +466,14 @@ async function salvarEstrutura() {
             headers: {'Content-Type':'application/json'},
             body: JSON.stringify({ estrutura: estruturaData })
         });
-        alert('Estrutura salva com sucesso!');
+        alert('Estrutura salva!');
     } catch (e) {
         alert('Erro ao salvar');
     }
 }
 
 async function resetEstrutura() {
-    if (!confirm('Isso vai restaurar a estrutura inicial. Continuar?')) return;
+    if (!confirm('Restaurar estrutura inicial?')) return;
     try {
         const res = await fetch('/api/estrutura/reset', { method: 'POST' });
         estruturaData = await res.json();
@@ -553,9 +481,4 @@ async function resetEstrutura() {
     } catch (e) {
         alert('Erro ao resetar');
     }
-}
-
-// Inicialização quando entrar na aba
-function initPlanoProjeto() {
-    carregarEstrutura();
 }
