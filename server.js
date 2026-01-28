@@ -52,46 +52,86 @@ function loadTracking() {
 function saveTracking(data) {
   fs.writeFileSync(TRACKING_FILE, JSON.stringify(data, null, 2));
 }
-
 // =========================
-// INVENTÁRIO AUTOMÁTICO (GitHub)
+// INVENTÁRIO AUTOMÁTICO (GitHub) - COM LOGS DE DEBUG
 // =========================
 async function atualizarInventarioGitHub() {
   try {
+    console.log("🔍 [DEBUG] Iniciando busca no GitHub...");
+    console.log("🔍 [DEBUG] Token existe:", !!process.env.GITHUB_TOKEN);
+    console.log("🔍 [DEBUG] Token (primeiros 10 chars):", process.env.GITHUB_TOKEN ? process.env.GITHUB_TOKEN.substring(0, 10) + "..." : "VAZIO");
+    
     const tracking = loadTracking();
     
-    // Buscar estrutura de arquivos
+    // Testar primeiro se consegue acessar o repo
+    console.log("🔍 [DEBUG] Testando acesso ao repo...");
+    const repoCheck = await axios.get(
+      'https://api.github.com/repos/indusales/indusales-connect-sell',
+      { 
+        headers: { 
+          'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github+json',
+          'User-Agent': 'INDUSALES-App'
+        } 
+      }
+    );
+    
+    console.log("✅ [DEBUG] Repo acessível! Branch default:", repoCheck.data.default_branch);
+    const branch = repoCheck.data.default_branch || 'main'; // Pega a branch correta automaticamente
+    
+    // Buscar árvore de arquivos
+    console.log(`🔍 [DEBUG] Buscando árvore na branch: ${branch}`);
     const treeRes = await axios.get(
-      'https://api.github.com/repos/indusales/indusales-connect-sell/git/trees/main?recursive=1',
-      { headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } }
+      `https://api.github.com/repos/indusales/indusales-connect-sell/git/trees/${branch}?recursive=1`,
+      { 
+        headers: { 
+          'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github+json',
+          'User-Agent': 'INDUSALES-App'
+        } 
+      }
     );
     
     const files = treeRes.data.tree;
+    console.log(`✅ [DEBUG] Total de arquivos encontrados: ${files.length}`);
     
-    // Detectar páginas (app/ ou pages/ ou src/)
+    // Detectar páginas (app/, pages/, src/pages/)
     const paginas = files
-      .filter(f => f.path.match(/\.(tsx|jsx|vue|html)$/))
+      .filter(f => f.path.match(/\.(tsx|jsx|vue|html|ts|js)$/) && !f.path.includes('node_modules'))
       .map(f => ({
         nome: f.path.split('/').pop(),
         caminho: f.path,
-        tipo: f.path.includes('page') || f.path.includes('index') ? 'página' : 'componente'
+        tipo: (f.path.match(/(app|pages|src\/pages)/) || f.path.includes('page')) ? 'página' : 'componente'
       }));
       
-    // Detectar possíveis tabelas (de arquivos SQL ou migrations)
+    console.log(`✅ [DEBUG] Páginas detectadas: ${paginas.filter(p => p.tipo === 'página').length}`);
+    console.log(`✅ [DEBUG] Componentes detectados: ${paginas.filter(p => p.tipo === 'componente').length}`);
+      
+    // Detectar SQL
     const sqlFiles = files.filter(f => f.path.endsWith('.sql'));
+    console.log(`✅ [DEBUG] Arquivos SQL: ${sqlFiles.length}`);
     
     // Buscar último commit
     const commitRes = await axios.get(
-      'https://api.github.com/repos/indusales/indusales-connect-sell/commits?per_page=1',
-      { headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } }
+      `https://api.github.com/repos/indusales/indusales-connect-sell/commits?per_page=1&sha=${branch}`,
+      { 
+        headers: { 
+          'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github+json',
+          'User-Agent': 'INDUSALES-App'
+        } 
+      }
     );
     
     const ultimoCommit = commitRes.data[0];
+    console.log("✅ [DEBUG] Último commit:", ultimoCommit?.commit?.message?.substring(0, 50));
     
     tracking.inventario = {
       paginas: paginas.filter(p => p.tipo === 'página'),
       componentes: paginas.filter(p => p.tipo === 'componente'),
       tabelas: sqlFiles.map(f => f.path),
+      branch_usada: branch,
+      total_arquivos: files.length,
       ultimo_commit: {
         mensagem: ultimoCommit?.commit?.message || "N/A",
         data: ultimoCommit?.commit?.committer?.date || new Date().toISOString(),
@@ -101,13 +141,19 @@ async function atualizarInventarioGitHub() {
     };
     
     saveTracking(tracking);
+    console.log("✅ [DEBUG] Inventário salvo com sucesso!");
     return tracking.inventario;
+    
   } catch (error) {
-    console.error("Erro ao buscar inventário:", error.message);
+    console.error("❌ [DEBUG] ERRO COMPLETO:", error.message);
+    if (error.response) {
+      console.error("❌ [DEBUG] Status HTTP:", error.response.status);
+      console.error("❌ [DEBUG] Mensagem da API:", error.response.data?.message);
+      console.error("❌ [DEBUG] URL que falhou:", error.config?.url);
+    }
     return null;
   }
 }
-
 // =========================
 // GERADOR DE COMANDOS
 // =========================
@@ -153,6 +199,55 @@ Agora gere o comando para:`
 // =========================
 
 // Inventário automático
+// ROTA DE DIAGNÓSTICO (temporária - pode remover depois de funcionar)
+app.get("/api/teste-github", async (req, res) => {
+  try {
+    console.log("🔍 Teste de conexão GitHub iniciado...");
+    
+    // Teste 1: Verificar se token existe
+    if (!process.env.GITHUB_TOKEN) {
+      return res.json({ erro: "TOKEN_VAZIO", mensagem: "GITHUB_TOKEN não configurado no Render" });
+    }
+    
+    // Teste 2: Verificar formato do token
+    if (!process.env.GITHUB_TOKEN.startsWith('ghp_') && !process.env.GITHUB_TOKEN.startsWith('github_pat_')) {
+      return res.json({ 
+        erro: "FORMATO_INVALIDO", 
+        mensagem: "Token não parece ser um GitHub token válido",
+        prefixo: process.env.GITHUB_TOKEN.substring(0, 10) + "..."
+      });
+    }
+    
+    // Teste 3: Tentar acessar API
+    const teste = await axios.get(
+      'https://api.github.com/repos/indusales/indusales-connect-sell',
+      { 
+        headers: { 
+          'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github+json'
+        } 
+      }
+    );
+    
+    res.json({
+      sucesso: true,
+      repositorio: "indusales/indusales-connect-sell",
+      branch_default: teste.data.default_branch,
+      privado: teste.data.private,
+      token_funcionando: true,
+      mensagem: "Tudo certo! O token tem acesso ao repositório."
+    });
+    
+  } catch (error) {
+    res.json({
+      sucesso: false,
+      erro: error.response?.status,
+      mensagem: error.response?.data?.message || error.message,
+      solucao: error.response?.status === 404 ? "Repositório não existe ou token sem acesso" : 
+               error.response?.status === 401 ? "Token inválido ou expirado" : "Erro desconhecido"
+    });
+  }
+});
 app.get("/api/inventario", async (req, res) => {
   const tracking = loadTracking();
   
