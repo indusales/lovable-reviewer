@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard | INDUSALES Architect</title>
+    <link rel="stylesheet" href="/css/dashboard.css">
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <div class="layout">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">🏗️</div>
+                <div class="brand">INDUSALES</div>
+            </div>
+            
+            <nav class="nav">
+                <div class="nav-section">
+                    <span class="nav-title">Menu</span>
+                    <a href="#inventario" class="nav-item active" onclick="scrollToSection('inventario')">
+                        <i data-lucide="folder-git-2"></i>
+                        <span>Inventário</span>
+                    </a>
+                    <a href="#backlog" class="nav-item" onclick="scrollToSection('backlog')">
+                        <i data-lucide="list-todo"></i>
+                        <span>Backlog</span>
+                    </a>
+                    <a href="#gerador" class="nav-item" onclick="scrollToSection('gerador')">
+                        <i data-lucide="sparkles"></i>
+                        <span>Gerador IA</span>
+                    </a>
+                </div>
+                
+                <div class="nav-section">
+                    <span class="nav-title">Fases</span>
+                    {{FASES_NAV}}
+                </div>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="user-avatar">{{USER}}</div>
+                    <div class="user-details">
+                        <span class="user-name">{{USER}}</span>
+                        <span class="user-role">Administrador</span>
+                    </div>
+                </div>
+                <a href="/logout" class="logout-btn" title="Sair">
+                    <i data-lucide="log-out"></i>
+                </a>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main">
+            <header class="header">
+                <div>
+                    <h1>Dashboard</h1>
+                    <p class="breadcrumb">Visão geral do projeto INDUSALES v5.0</p>
+                </div>
+                <div class="actions">
+                    <span class="last-sync" id="last-sync">Atualizando...</span>
+                    <button class="btn btn-outline" onclick="syncGitHub()">
+                        <i data-lucide="refresh-cw"></i>
+                        Sync GitHub
+                    </button>
+                </div>
+            </header>
+
+            <div class="grid">
+                <!-- Inventário -->
+                <section class="card" id="inventario">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <div class="icon-bg blue"><i data-lucide="folder-git-2"></i></div>
+                            Inventário GitHub
+                        </div>
+                        <span class="badge" id="stats-files">0 arquivos</span>
+                    </div>
+                    <div class="card-body" id="inventario-list">
+                        <div class="loading">Carregando inventário...</div>
+                    </div>
+                </section>
+
+                <!-- Backlog -->
+                <section class="card" id="backlog">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <div class="icon-bg green"><i data-lucide="list-todo"></i></div>
+                            Fila de Desenvolvimento
+                        </div>
+                        <button class="btn btn-sm btn-primary" onclick="openAddModal()">+ Novo</button>
+                    </div>
+                    <div class="card-body" id="backlog-list">
+                        <div class="loading">Carregando backlog...</div>
+                    </div>
+                </section>
+
+                <!-- Gerador -->
+                <section class="card card-full" id="gerador">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <div class="icon-bg amber"><i data-lucide="sparkles"></i></div>
+                            Gerador de Comandos Lovable
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <form id="gerador-form" onsubmit="gerarComando(event)">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Selecionar da Fila</label>
+                                    <select id="select-backlog" class="input" onchange="handleBacklogChange()">
+                                        <option value="">-- Escolher tarefa --</option>
+                                        <option value="custom">✏️ Descrição manual...</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Fase do Projeto</label>
+                                    <select id="select-fase" class="input" required>
+                                        {{FASES_OPTIONS}}
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group" id="custom-input" style="display:none;">
+                                <label>Descrição da Feature</label>
+                                <textarea id="feature-desc" class="input" rows="3" placeholder="Descreva a funcionalidade em até 80 palavras..."></textarea>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary btn-full">
+                                <i data-lucide="wand-2"></i>
+                                Gerar Comando Otimizado
+                            </button>
+                        </form>
+
+                        <div id="resultado" class="resultado" style="display:none;">
+                            <div class="result-header">
+                                <span>Comando Gerado</span>
+                                <button class="btn btn-sm btn-secondary" onclick="copiarComando()">
+                                    <i data-lucide="copy"></i> Copiar
+                                </button>
+                            </div>
+                            <pre id="comando-texto" class="comando-code"></pre>
+                            <div class="result-actions">
+                                <button class="btn btn-success" onclick="marcarConcluido()">
+                                    <i data-lucide="check"></i> Marcar Concluído
+                                </button>
+                                <button class="btn btn-secondary" onclick="novoComando()">Novo Comando</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal Adicionar -->
+    <div id="modal-add" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Adicionar à Fila</h3>
+                <button class="btn-close" onclick="closeModal()">&times;</button>
+            </div>
+            <form onsubmit="addToBacklog(event)">
+                <div class="form-group">
+                    <label>Nome da Funcionalidade</label>
+                    <input type="text" id="new-feature" class="input" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Fase</label>
+                        <select id="new-fase" class="input">{{FASES_OPTIONS}}</select>
+                    </div>
+                    <div class="form-group">
+                        <label>Prioridade</label>
+                        <select id="new-priority" class="input">
+                            <option value="baixa">📌 Baixa</option>
+                            <option value="media" selected>⚡ Média</option>
+                            <option value="alta">🔥 Alta</option>
+                        </select>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary btn-full">Adicionar</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="/js/dashboard.js"></script>
+</body>
+</html>
