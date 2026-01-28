@@ -3,6 +3,7 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
+import cookieParser from "cookie-parser"; // ADICIONE
 
 import authRoutes from "./src/routes/auth.js";
 import apiRoutes from "./src/routes/api.js";
@@ -15,9 +16,10 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Middleware
+// Middleware GLOBAL
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser()); // ADICIONE AQUI
 app.use(express.static(path.join(__dirname, "public")));
 
 // Inicialização
@@ -33,8 +35,8 @@ app.get("/", (req, res) => {
   res.redirect("/login");
 });
 
-// Sincronização inicial com GitHub (se vazio)
-const tracking = JSON.parse(fs.existsSync('./project_tracking.json') ? fs.readFileSync('./project_tracking.json') : '{}');
+// Sincronização inicial
+const tracking = loadTracking();
 if (!tracking.inventario?.paginas?.length) {
   console.log('🔄 Pré-carregando inventário...');
   atualizarInventarioGitHub().catch(console.error);
@@ -42,6 +44,5 @@ if (!tracking.inventario?.paginas?.length) {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 INDUSALES Architect v5.0 rodando na porta ${PORT}`);
-  console.log(`🔐 Login: http://localhost:${PORT}/login`);
+  console.log(`🚀 Server rodando na porta ${PORT}`);
 });
