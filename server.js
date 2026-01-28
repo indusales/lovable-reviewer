@@ -33,10 +33,60 @@ const openai = new OpenAI({
 });
 
 /* =========================
-   Funções Auxiliares
+   CONTEXTO INDUSALES v4.0
+   (Documento Mestre - referência para o Arquiteto)
+========================= */
+const INDUSALES_CONTEXT = `
+SISTEMA: INDUSALES SAAS v4.0 - Marketplace B2B de Semi-Jóias (White Label)
+
+HIERARQUIA DE USUÁRIOS:
+1. INDUSALES (Admin): Super Admin, Administrador, Atendente, Dev
+2. FABRICANTE: Admin, Gerente, Atendente, Financeiro
+3. REVENDEDOR: Ativo, Inativo, Bloqueado (auto após 120 dias)
+4. CLIENTE FINAL: Cadastrado, Avulso
+
+STACK TECNOLÓGICA OBRIGATÓRIA:
+- Frontend: React 18 + TypeScript + Tailwind CSS (apenas!)
+- Backend: Supabase (PostgreSQL + Auth + Edge Functions)
+- Estado: React Query (TanStack Query) ou Zustand
+- UI Components: shadcn/ui (padrão)
+- Ícones: Lucide React apenas
+- NUNCA use: Material UI, Bootstrap, Styled Components
+
+REGRAS CRÍTICAS DE NEGÓCIO:
+- Multi-tenant strict: usuário só vê dados do seu tenant_id
+- Preços só visíveis após dupla aprovação (Indusales + Fabricante)
+- Isolamento: Fabricante nunca vê revendedores de outros fabricantes
+- Reserva de estoque: TTL 1h (Redis/Supabase)
+- Fiado: parcela única, prazos 7/15/30 dias, limite por cliente
+- 2FA obrigatório para admins (TOTP)
+
+BANCO DE DADOS (Supabase):
+- Tabela: profiles (id, user_id, role, tenant_id, status, email, full_name)
+- Tabela: products (id, tenant_id, name, sku, price_cost, price_sale, stock_qty, category)
+- Tabela: approvals (id, reseller_id, manufacturer_id, status, requested_at, approved_at)
+- Tabela: orders (id, reseller_id, items, total_amount, status, payment_type, created_at)
+- Tabela: customers (id, reseller_id, name, phone, credit_limit, current_debt, status)
+- RLS: Policies strict por tenant_id
+
+CONSTRAINTS VISUAIS:
+- Paleta: Primária #0f172a (slate-900), Secundária #1e293b (slate-800), Accent #f59e0b (amber-500)
+- Layout: Mobile-first, responsivo, sidebar collapsible
+- Fonte: Inter (padrão system-ui)
+- Formulários: React Hook Form + Zod validation
+- Toast notifications: Sonner (padronizado)
+
+PROIBIDO:
+- Criar APIs externas (use Supabase Edge Functions se necessário)
+- Adicionar bibliotecas não listadas sem aprovação
+- Inventar campos no banco além do escopo
+- Criar telas de admin fora do perfil do usuário logado
+`;
+
+/* =========================
+   Funções Auxiliares - REVISOR (existente)
 ========================= */
 
-// Review genérico com OpenAI
 async function performReview(diff, context) {
   if (!diff || diff.trim().length === 0) {
     return { result: "Nenhuma alteração detectada no diff." };
@@ -49,270 +99,10 @@ async function performReview(diff, context) {
         {
           role: "system",
           content: `
-Você é um engenheiro de software sênior e gerente de projeto.
+Você é um engenheiro de software sênior revisando código React/TypeScript.
 
-Objetivos:
-- Melhorar qualidade do código
-- Reduzir complexidade
-- Reduzir custo de manutenção
-- Preservar intenção original
-
-REGRAS IMPORTANTES:
-- Trabalhe APENAS sobre o diff recebido
-- NÃO reescreva código fora do diff
-- NÃO invente requisitos
-- Seja objetivo e técnico
-
-RETORNE ESTRITAMENTE NO FORMATO JSON:
-{
-  "final_diff": "diff final pronto para git apply",
-  "observacoes": ["bullet curto"],
-  "riscos": ["se houver"]
-}
-          `
-        },
-        {
-          role: "user",
-          content: `
-CONTEXTO:
-${context || "N/A"}
-
-DIFF:
-${diff}
-          `
-        }
-      ]
-    });
-
-    const output = response.output?.[0]?.content?.[0]?.text || "";
-    return { result: output };
-  } catch (error) {
-    console.error("Erro OpenAI:", error.message);
-    throw new Error("Falha ao gerar review com OpenAI");
-  }
-}
-
-// Review de Pull Request
-async function performPRReview(owner, repo, pull_number) {
-  if (!owner || !repo || !pull_number) {
-    throw new Error("owner, repo e pull_number são obrigatórios");
-  }
-
-  const prUrl = `https://api.github.com/repos/${owner}/${repo}/pulls/${pull_number}`;
-
-  const prResponse = await axios.get(prUrl, {
-    headers: {
-      Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
-      Accept: "application/vnd.github.v3.diff"
-    }
-  });
-
-  const diff = prResponse.data;
-
-  if (!diff) {
-    console.log("ℹ️ Nenhum diff no PR");
-    return { ok: true, commented: false, reason: "no_diff" };
-  }
-
-  const reviewResult = await performReview(
-    diff, 
-    `PR #${pull_number} do repositório ${owner}/${repo}`
-  );
-
-  await axios.post(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${pull_number}/comments`,
-    {
-      body: `🤖 **Code Review Automático (OpenAI o3)**
-
-${reviewResult.result || "Sem observações."}`
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
-        Accept: "application/vnd.github.v3+json"
-      }
-    }
-  );
-
-  console.log(`✅ Comentário postado no PR #${pull_number}`);
-  return { ok: true, commented: true };
-}
-
-// NOVO: Review de Commit Direto (Push)
-async function performPushReview(owner, repo, commitSha) {
-  if (!owner || !repo || !commitSha) {
-    throw new Error("owner, repo e commitSha são obrigatórios");
-  }
-
-  try {
-    // Buscar diff do commit específico
-    const commitUrl = `https://api.github.com/repos/${owner}/${repo}/commits/${commitSha}`;
-    
-    const commitResponse = await axios.get(commitUrl, {
-      headers: {
-        Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
-        Accept: "application/vnd.github.v3.diff"
-      }
-    });
-
-    const diff = commitResponse.data;
-
-    if (!diff || diff.trim().length === 0) {
-      console.log(`ℹ️ Commit ${commitSha.substring(0, 7)} sem alterações de código`);
-      return { ok: true, commented: false };
-    }
-
-    const reviewResult = await performReview(
-      diff, 
-      `Commit ${commitSha.substring(0, 7)} em ${owner}/${repo}`
-    );
-
-    // Comentar diretamente no commit
-    await axios.post(
-      `https://api.github.com/repos/${owner}/${repo}/commits/${commitSha}/comments`,
-      {
-        body: `🤖 **Code Review Automático (OpenAI o3)** - Commit direto
-
-${reviewResult.result || "Sem observações."}`
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
-          Accept: "application/vnd.github.v3+json"
-        }
-      }
-    );
-
-    console.log(`✅ Comentário postado no commit ${commitSha.substring(0, 7)}`);
-    return { ok: true, commented: true };
-
-  } catch (error) {
-    console.error(`❌ Erro ao revisar commit ${commitSha}:`, error.response?.data || error.message);
-    throw error;
-  }
-}
-
-/* =========================
-   Routes HTTP
-========================= */
-
-// Health check
-app.get("/", (req, res) => {
-  res.json({ 
-    status: "online", 
-    service: "lovable-reviewer",
-    timestamp: new Date().toISOString(),
-    version: "2.0.0"
-  });
-});
-
-// Webhook principal do GitHub
-app.post("/github-webhook", async (req, res) => {
-  try {
-    const event = req.headers["x-github-event"];
-    
-    // Responde imediatamente ao GitHub (não bloquear)
-    res.status(200).json({ ok: true, received: event });
-    
-    console.log(`📥 Evento recebido: ${event}`);
-
-    // PROCESSAR PULL REQUEST
-    if (event === "pull_request") {
-      const action = req.body.action;
-      
-      if (!["opened", "synchronize", "reopened"].includes(action)) {
-        console.log(`⏩ Ignorando ação de PR: ${action}`);
-        return;
-      }
-
-      const pr = req.body.pull_request;
-      const owner = pr.base.repo.owner.login;
-      const repo = pr.base.repo.name;
-      const pull_number = pr.number;
-
-      console.log(`📌 Processando PR: ${owner}/${repo} #${pull_number} (${action})`);
-      
-      try {
-        await performPRReview(owner, repo, pull_number);
-      } catch (error) {
-        console.error("❌ Erro ao processar PR:", error.message);
-      }
-    }
-    
-    // PROCESSAR PUSH (Commit direto)
-    else if (event === "push") {
-      const ref = req.body.ref;
-      const owner = req.body.repository.owner.login;
-      const repo = req.body.repository.name;
-      
-      // Só processa push na main ou master (ignore branches de feature/PR)
-      if (!ref.includes('main') && !ref.includes('master')) {
-        console.log(`⏩ Ignorando push para branch: ${ref}`);
-        return;
-      }
-
-      const commits = req.body.commits;
-      
-      if (!commits || commits.length === 0) {
-        console.log("ℹ️ Push sem commits (possivelmente merge)");
-        return;
-      }
-
-      // Pega o último commit do push para revisar
-      const lastCommit = commits[commits.length - 1];
-      const commitSha = lastCommit.id;
-      
-      console.log(`📌 Processando Push: ${owner}/${repo} - ${commitSha.substring(0, 7)}`);
-      
-      try {
-        await performPushReview(owner, repo, commitSha);
-      } catch (error) {
-        console.error("❌ Erro ao processar Push:", error.message);
-      }
-    }
-    
-    else {
-      console.log(`⏩ Evento ignorado: ${event}`);
-    }
-
-  } catch (error) {
-    console.error("❌ Erro no webhook:", error);
-  }
-});
-
-// Rotas manuais (para testes)
-app.post("/review", async (req, res) => {
-  try {
-    const { diff, context } = req.body;
-    if (!diff) {
-      return res.status(400).json({ error: "diff é obrigatório" });
-    }
-    const result = await performReview(diff, context);
-    res.json(result);
-  } catch (error) {
-    console.error("Erro /review:", error);
-    res.status(500).json({ error: "Erro ao processar review", details: error.message });
-  }
-});
-
-app.post("/review-pr", async (req, res) => {
-  try {
-    const { owner, repo, pull_number } = req.body;
-    const result = await performPRReview(owner, repo, pull_number);
-    res.json(result);
-  } catch (error) {
-    console.error("Erro /review-pr:", error.response?.data || error.message);
-    res.status(500).json({ error: "Erro ao revisar PR", details: error.message });
-  }
-});
-
-/* =========================
-   Start
-========================= */
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log(`🚀 API rodando na porta ${PORT}`);
-  console.log(`📍 Health check: http://localhost:${PORT}/`);
-  console.log(`🔗 Webhook endpoint: http://localhost:${PORT}/github-webhook`);
-});
+Critérios de avaliação:
+1. Qualidade: Código limpo, semântico, TypeScript strict
+2. Segurança: Sanitização de inputs, proteção contra XSS, validação Zod
+3. Performance: Evitar re-renders desnecessários, lazy loading quando útil
+4. Consistência: Segue padrões INDUSALES (shadcn
