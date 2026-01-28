@@ -103,10 +103,11 @@ router.post("/architect", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
 // ===== ESTRUTURA DO PROJETO (Hierárquica) =====
 // Modelo: { id, titulo, concluido, filhos: [], expandido }
 
-app.get("/estrutura", (req, res) => {
+router.get("/estrutura", (req, res) => {
   const tracking = loadTracking();
   if (!tracking.estrutura) {
     // Dados iniciais baseados nos documentos
@@ -116,7 +117,7 @@ app.get("/estrutura", (req, res) => {
   res.json(tracking.estrutura);
 });
 
-app.post("/estrutura", (req, res) => {
+router.post("/estrutura", (req, res) => {
   const { estrutura } = req.body;
   const tracking = loadTracking();
   tracking.estrutura = estrutura;
@@ -124,7 +125,7 @@ app.post("/estrutura", (req, res) => {
   res.json({ success: true });
 });
 
-app.post("/estrutura/reset", (req, res) => {
+router.post("/estrutura/reset", (req, res) => {
   const tracking = loadTracking();
   tracking.estrutura = getEstruturaInicial();
   saveTracking(tracking);
@@ -320,4 +321,5 @@ function getEstruturaInicial() {
     }
   ];
 }
+
 export default router;
