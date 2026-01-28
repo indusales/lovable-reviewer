@@ -31,6 +31,10 @@
                         <i data-lucide="sparkles"></i>
                         <span>Gerador IA</span>
                     </a>
+					<a href="#plano" class="nav-item" onclick="showTab('plano')">
+						<i data-lucide="list-tree" style="width:18px;"></i>
+						<span>Plano de Projeto</span>
+					</a>
                 </div>
                 
                 <div class="nav-section">
@@ -152,6 +156,34 @@
                         </div>
                     </div>
                 </section>
+                <!-- PLANO DE PROJETO ← COLE AQUI -->
+                <section class="card card-full" id="tab-plano" style="display:none;">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <div class="icon-bg" style="background:rgba(139,92,246,0.15);color:#a78bfa;">
+                                <i data-lucide="list-tree"></i>
+                            </div>
+                            Estrutura do Projeto
+                        </div>
+                        <div style="display:flex;gap:8px;">
+                            <button class="btn btn-sm btn-secondary" onclick="salvarEstrutura()">
+                                <i data-lucide="save" style="width:14px;"></i> Salvar
+                            </button>
+                            <button class="btn btn-sm btn-secondary" onclick="resetEstrutura()">
+                                <i data-lucide="refresh-cw" style="width:14px;"></i> Reset
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="arvore-container" style="font-size:14px;">
+                            Carregando estrutura...
+                        </div>
+                    </div>
+                </section>
+
+            </div>  <!-- ← FECHAMENTO DO GRID (.grid) -->
+        </main>
+    </div>
             </div>
         </main>
     </div>

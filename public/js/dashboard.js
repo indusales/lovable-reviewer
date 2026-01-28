@@ -315,3 +315,247 @@ style.textContent = `
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 `;
 document.head.appendChild(style);
+// ===== PLANO DE PROJETO (Árvore Hierárquica) =====
+let estruturaData = [];
+
+async function carregarEstrutura() {
+    try {
+        const res = await fetch('/api/estrutura');
+        estruturaData = await res.json();
+        renderArvore();
+    } catch (e) {
+        console.error('Erro ao carregar estrutura:', e);
+        document.getElementById('arvore-container').innerHTML = 'Erro ao carregar.';
+    }
+}
+
+function renderArvore() {
+    const container = document.getElementById('arvore-container');
+    if (!container) return;
+    container.innerHTML = buildTreeHTML(estruturaData, 0);
+}
+
+function buildTreeHTML(nos, nivel) {
+    if (!nos || nos.length === 0) return '';
+    
+    const indent = nivel * 24; // Indentação em pixels
+    let html = `<ul style="list-style:none;padding:0;margin:0;">`;
+    
+    nos.forEach((no, index) => {
+        const temFilhos = no.filhos && no.filhos.length > 0;
+        const corCheckbox = no.concluido ? '#10b981' : 'transparent';
+        const textDecoration = no.concluido ? 'line-through' : 'none';
+        const opacity = no.concluido ? '0.6' : '1';
+        
+        html += `
+            <li style="margin:4px 0;position:relative;">
+                <div style="
+                    display:flex;
+                    align-items:center;
+                    gap:8px;
+                    padding:8px 12px;
+                    margin-left:${indent}px;
+                    background:rgba(255,255,255,0.03);
+                    border:1px solid rgba(255,255,255,0.1);
+                    border-radius:8px;
+                    transition:all 0.2s;
+                    opacity:${opacity};
+                " onmouseover="this.style.background='rgba(255,255,255,0.08)'" 
+                   onmouseout="this.style.background='rgba(255,255,255,0.03)'">
+                    
+                    <!-- Expandir/Colapsar -->
+                    ${temFilhos ? `
+                        <button onclick="toggleExpandido('${no.id}')" 
+                                style="background:none;border:none;color:#64748b;cursor:pointer;padding:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:4px;transition:0.2s;">
+                            <span style="transform:${no.expandido ? 'rotate(90deg)' : 'rotate(0deg)'};transition:transform 0.2s;">▶</span>
+                        </button>
+                    ` : '<span style="width:24px;"></span>'}
+                    
+                    <!-- Checkbox -->
+                    <div onclick="toggleConcluido('${no.id}')" 
+                         style="width:18px;height:18px;border:2px solid #475569;border-radius:4px;cursor:pointer;background:${corCheckbox};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                        ${no.concluido ? '<i data-lucide="check" style="width:12px;color:white;"></i>' : ''}
+                    </div>
+                    
+                    <!-- Título editável -->
+                    <span onclick="editarTitulo('${no.id}')" 
+                          style="flex:1;cursor:text;text-decoration:${textDecoration};color:${no.concluido ? '#94a3b8' : '#f1f5f9'};font-weight:${nivel === 0 ? '600' : (nivel === 1 ? '500' : '400')};font-size:${nivel === 0 ? '15px' : (nivel === 1 ? '14px' : '13px')};">
+                        ${escapeHtml(no.titulo)}
+                    </span>
+                    
+                    <!-- Ações -->
+                    <div style="display:flex;gap:4px;opacity:0;transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0">
+                        <button onclick="adicionarFilho('${no.id}')" class="btn btn-sm" style="padding:4px 8px;font-size:11px;" title="Adicionar subtarefa">
+                            <i data-lucide="plus" style="width:12px;"></i>
+                        </button>
+                        <button onclick="removerNo('${no.id}')" class="btn btn-sm" style="padding:4px 8px;font-size:11px;background:rgba(239,68,68,0.2);color:#fca5a5;" title="Remover">
+                            <i data-lucide="trash-2" style="width:12px;"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Filhos recursivos -->
+                ${(temFilhos && no.expandido) ? buildTreeHTML(no.filhos, nivel + 1) : ''}
+            </li>
+        `;
+    });
+    
+    // Botão adicionar no nível raiz (apenas no nível 0)
+    if (nivel === 0) {
+        html += `
+            <li style="margin-top:12px;margin-left:${indent}px;">
+                <button onclick="adicionarRaiz()" class="btn btn-secondary" style="width:100%;padding:10px;border-style:dashed;">
+                    <i data-lucide="plus" style="width:14px;"></i> Adicionar Tarefa Principal
+                </button>
+            </li>
+        `;
+    }
+    
+    html += `</ul>`;
+    return html;
+}
+
+function findNo(nos, id) {
+    for (let no of nos) {
+        if (no.id === id) return no;
+        if (no.filhos) {
+            const found = findNo(no.filhos, id);
+            if (found) return found;
+        }
+    }
+    return null;
+}
+
+function findParent(nos, id, parent = null) {
+    for (let no of nos) {
+        if (no.id === id) return parent;
+        if (no.filhos) {
+            const found = findParent(no.filhos, id, no);
+            if (found) return found;
+        }
+    }
+    return null;
+}
+
+function toggleExpandido(id) {
+    const no = findNo(estruturaData, id);
+    if (no) {
+        no.expandido = !no.expandido;
+        renderArvore();
+    }
+}
+
+function toggleConcluido(id) {
+    const no = findNo(estruturaData, id);
+    if (no) {
+        no.concluido = !no.concluido;
+        // Recursivamente marca/desmarca filhos?
+        // marcarFilhos(no, no.concluido);
+        renderArvore();
+    }
+}
+
+function marcarFilhos(no, valor) {
+    if (no.filhos) {
+        no.filhos.forEach(f => {
+            f.concluido = valor;
+            marcarFilhos(f, valor);
+        });
+    }
+}
+
+function editarTitulo(id) {
+    const no = findNo(estruturaData, id);
+    if (!no) return;
+    
+    const novo = prompt('Editar tarefa:', no.titulo);
+    if (novo !== null && novo.trim() !== '') {
+        no.titulo = novo.trim();
+        renderArvore();
+    }
+}
+
+function adicionarFilho(parentId) {
+    const parent = findNo(estruturaData, parentId);
+    if (!parent) return;
+    
+    if (!parent.filhos) parent.filhos = [];
+    
+    const novoId = `${parentId}.${parent.filhos.length + 1}`;
+    const titulo = prompt('Nome da nova subtarefa:');
+    if (titulo && titulo.trim()) {
+        parent.filhos.push({
+            id: novoId,
+            titulo: titulo.trim(),
+            concluido: false,
+            expandido: false,
+            filhos: []
+        });
+        parent.expandido = true; // Auto-expande
+        renderArvore();
+    }
+}
+
+function adicionarRaiz() {
+    const titulo = prompt('Nome da nova tarefa principal:');
+    if (titulo && titulo.trim()) {
+        const novoId = (estruturaData.length + 1).toString();
+        estruturaData.push({
+            id: novoId,
+            titulo: titulo.trim(),
+            concluido: false,
+            expandido: true,
+            filhos: []
+        });
+        renderArvore();
+    }
+}
+
+function removerNo(id) {
+    if (!confirm('Tem certeza que deseja remover esta tarefa e todas as subtarefas?')) return;
+    
+    // Remove do array pai
+    function removeRec(nos, id) {
+        const idx = nos.findIndex(n => n.id === id);
+        if (idx !== -1) {
+            nos.splice(idx, 1);
+            return true;
+        }
+        for (let no of nos) {
+            if (no.filhos && removeRec(no.filhos, id)) return true;
+        }
+        return false;
+    }
+    
+    removeRec(estruturaData, id);
+    renderArvore();
+}
+
+async function salvarEstrutura() {
+    try {
+        await fetch('/api/estrutura', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ estrutura: estruturaData })
+        });
+        alert('Estrutura salva com sucesso!');
+    } catch (e) {
+        alert('Erro ao salvar');
+    }
+}
+
+async function resetEstrutura() {
+    if (!confirm('Isso vai restaurar a estrutura inicial. Continuar?')) return;
+    try {
+        const res = await fetch('/api/estrutura/reset', { method: 'POST' });
+        estruturaData = await res.json();
+        renderArvore();
+    } catch (e) {
+        alert('Erro ao resetar');
+    }
+}
+
+// Inicialização quando entrar na aba
+function initPlanoProjeto() {
+    carregarEstrutura();
+}
