@@ -1,3 +1,11 @@
+// Se tiver user/pass configurado, exige auth
+if (process.env.DASHBOARD_USER && process.env.DASHBOARD_PASS) {
+  app.use('/dashboard', (req, res, next) => {
+    const auth = req.headers.authorization;
+    if (!auth) return res.status(401).send('Login necessário');
+    // ... validar usuario/senha
+  });
+}
 import "dotenv/config";
 import express from "express";
 import OpenAI from "openai";
