@@ -1,4 +1,4 @@
-// src/data/estrutura.js - Estrutura do Projeto INDUSALES v4.0
+// src/data/estrutura.js - Estrutura do Projeto INDUSALES v4.0 (Reorganizado MVP vs Futuro)
 
 export function getEstruturaInicial() {
   return [
@@ -32,7 +32,10 @@ export function getEstruturaInicial() {
             { id: "1.2.1", titulo: "Triagem Indusales (Documentação)", concluido: false, expandido: false, filhos: [] },
             { id: "1.2.2", titulo: "Vínculo Fabricante-Revendedor", concluido: false, expandido: false, filhos: [] },
             { id: "1.2.3", titulo: "Visibilidade de Preços (Pós-aprovação)", concluido: false, expandido: false, filhos: [] },
-            { id: "1.2.4", titulo: "Bloqueio Automático 120 dias", concluido: false, expandido: false, filhos: [] }
+            { id: "1.2.4", titulo: "Inatividade 4 Meses + Cobrança por Ativo", concluido: false, expandido: false, filhos: [
+              { id: "1.2.4.1", titulo: "Bloqueio automático após 120 dias sem login", concluido: false, expandido: false, filhos: [] },
+              { id: "1.2.4.2", titulo: "Modelo de billing: paga apenas por revendedor ativo", concluido: false, expandido: false, filhos: [] }
+            ]}
           ]
         },
         {
@@ -65,24 +68,19 @@ export function getEstruturaInicial() {
             { id: "2.1.1", titulo: "identity-svc (Auth 2FA RBAC) :3000", concluido: false, expandido: false, filhos: [] },
             { id: "2.1.2", titulo: "catalog-svc (Produtos/Estoque) :3002", concluido: false, expandido: false, filhos: [] },
             { id: "2.1.3", titulo: "order-svc (Pedidos/Carrinho) :3003", concluido: false, expandido: false, filhos: [] },
-            { id: "2.1.4", titulo: "payment-svc (PIX/Split) :3004", concluido: false, expandido: false, filhos: [] },
-            { id: "2.1.5", titulo: "freight-svc (Frete/ST) :3005", concluido: false, expandido: false, filhos: [] },
-            { id: "2.1.6", titulo: "notification-svc (WhatsApp/Email) :3006", concluido: false, expandido: false, filhos: [] }
+            { id: "2.1.4", titulo: "payment-svc (PIX/Controle Simples) :3004", concluido: false, expandido: false, filhos: [] },
+            { id: "2.1.5", titulo: "notification-svc (WhatsApp/Email) :3006", concluido: false, expandido: false, filhos: [] }
           ]
         },
         {
           id: "2.2",
-          titulo: "2.2 Novos Serviços v4.0",
+          titulo: "2.2 Serviços de Suporte",
           concluido: false,
           expandido: false,
           filhos: [
             { id: "2.2.1", titulo: "crm-svc (Clientes Revendedor) :3016", concluido: false, expandido: false, filhos: [] },
-            { id: "2.2.2", titulo: "credit-svc (Fiado/Cobrança) :3017", concluido: false, expandido: false, filhos: [] },
-            { id: "2.2.3", titulo: "reservation-svc (TTL 1h) Go :3018", concluido: false, expandido: false, filhos: [] },
-            { id: "2.2.4", titulo: "warranty-svc (PDF QR Code) :3019", concluido: false, expandido: false, filhos: [] },
-            { id: "2.2.5", titulo: "approval-svc (Workflow) :3020", concluido: false, expandido: false, filhos: [] },
-            { id: "2.2.6", titulo: "pos-sync-svc (Smart POS) :3021", concluido: false, expandido: false, filhos: [] },
-            { id: "2.2.7", titulo: "calendar-svc (Feriados) :3023", concluido: false, expandido: false, filhos: [] }
+            { id: "2.2.2", titulo: "approval-svc (Workflow) :3020", concluido: false, expandido: false, filhos: [] },
+            { id: "2.2.3", titulo: "calendar-svc (Feriados/Campanhas) :3023", concluido: false, expandido: false, filhos: [] }
           ]
         },
         {
@@ -101,89 +99,70 @@ export function getEstruturaInicial() {
     },
     {
       id: "3",
-      titulo: "📦 3. Catálogo e Estoque Avançado",
+      titulo: "📦 3. Catálogo e Estoque",
       concluido: false,
       expandido: false,
       filhos: [
         {
           id: "3.1",
-          titulo: "3.1 Multi-Warehouse",
+          titulo: "3.1 Multi-Warehouse Básico",
           concluido: false,
           expandido: false,
           filhos: [
-            { id: "3.1.1", titulo: "Cadastro Matriz/Filiais/CD", concluido: false, expandido: false, filhos: [] },
-            { id: "3.1.2", titulo: "Visão Consolidada Revendedor", concluido: false, expandido: false, filhos: [] },
-            { id: "3.1.3", titulo: "Estoque Consignado", concluido: false, expandido: false, filhos: [] },
-            { id: "3.1.4", titulo: "Sync Saldos Tempo Real", concluido: false, expandido: false, filhos: [] }
+            { id: "3.1.1", titulo: "Cadastro Matriz/Filiais", concluido: false, expandido: false, filhos: [] },
+            { id: "3.1.2", titulo: "Visão Consolidada Revendedor (Aprovados)", concluido: false, expandido: false, filhos: [] },
+            { id: "3.1.3", titulo: "Estoque Simples (Sem Lock)", concluido: false, expandido: false, filhos: [] }
           ]
         },
         {
           id: "3.2",
-          titulo: "3.2 Sistema de Reservas (TTL)",
+          titulo: "3.2 Marketplace Público (Core)",
           concluido: false,
           expandido: false,
           filhos: [
-            { id: "3.2.1", titulo: "Reserva 1h (Redis TTL)", concluido: false, expandido: false, filhos: [] },
-            { id: "3.2.2", titulo: "Liberação Automática Pós-1h", concluido: false, expandido: false, filhos: [] },
-            { id: "3.2.3", titulo: "Lock Máx 5 SKUs por Revendedor", concluido: false, expandido: false, filhos: [] },
-            { id: "3.2.4", titulo: "Notificação Fabricante", concluido: false, expandido: false, filhos: [] }
+            { id: "3.2.1", titulo: "Diretório Público de Fabricantes", concluido: false, expandido: false, filhos: [] },
+            { id: "3.2.2", titulo: "Filtros: Categoria, Localização, Rating", concluido: false, expandido: false, filhos: [] },
+            { id: "3.2.3", titulo: "Perfil Público com Avaliações", concluido: false, expandido: false, filhos: [] },
+            { id: "3.2.4", titulo: "Solicitação de Vínculo (Matchmaking)", concluido: false, expandido: false, filhos: [] }
           ]
         },
         {
           id: "3.3",
-          titulo: "3.3 White Label Unificado",
+          titulo: "3.3 White Label Unificado (Definição Pendente)",
           concluido: false,
           expandido: false,
           filhos: [
             { id: "3.3.1", titulo: "Score Mínimo Participação (8.0)", concluido: false, expandido: false, filhos: [] },
-            { id: "3.3.2", titulo: "Catálogo Multi-Fabricante", concluido: false, expandido: false, filhos: [] },
-            { id: "3.3.3", titulo: "Embalagens Padronizadas", concluido: false, expandido: false, filhos: [] },
-            { id: "3.3.4", titulo: "Logística Cross-Docking", concluido: false, expandido: false, filhos: [] }
+            { id: "3.3.2", titulo: "Catálogo Multi-Fabricante (Conceito)", concluido: false, expandido: false, filhos: [] },
+            { id: "3.3.3", titulo: "Logística Cross-Docking (Conceito)", concluido: false, expandido: false, filhos: [] }
           ]
         }
       ]
     },
     {
       id: "4",
-      titulo: "💰 4. Vendas e Financeiro",
+      titulo: "💰 4. Vendas e Financeiro (MVP)",
       concluido: false,
       expandido: false,
       filhos: [
         {
           id: "4.1",
-          titulo: "4.1 Sistema de Fiado (Credit)",
+          titulo: "4.1 Pagamentos Digitais",
           concluido: false,
           expandido: false,
           filhos: [
-            { id: "4.1.1", titulo: "Limite de Crédito por Cliente", concluido: false, expandido: false, filhos: [] },
-            { id: "4.1.2", titulo: "Prazos: 7, 15, 30 dias", concluido: false, expandido: false, filhos: [] },
-            { id: "4.1.3", titulo: "Parcela Única (Sem Juros)", concluido: false, expandido: false, filhos: [] },
-            { id: "4.1.4", titulo: "Cobrança Auto (D-1, D-Day, D+3, D+7)", concluido: false, expandido: false, filhos: [] },
-            { id: "4.1.5", titulo: "Bloqueio ao Atingir Limite", concluido: false, expandido: false, filhos: [] }
+            { id: "4.1.1", titulo: "PIX (QR Code + Copia/Cola)", concluido: false, expandido: false, filhos: [] },
+            { id: "4.1.2", titulo: "Confirmação Manual de Pagamentos", concluido: false, expandido: false, filhos: [] }
           ]
         },
         {
           id: "4.2",
-          titulo: "4.2 Pagamentos",
+          titulo: "4.2 Gestão de Acertos (Consignação)",
           concluido: false,
           expandido: false,
           filhos: [
-            { id: "4.2.1", titulo: "PIX (QR Code + Copia/Cola)", concluido: false, expandido: false, filhos: [] },
-            { id: "4.2.2", titulo: "Cartão Crédito (Split)", concluido: false, expandido: false, filhos: [] },
-            { id: "4.2.3", titulo: "Boleto Bancário", concluido: false, expandido: false, filhos: [] },
-            { id: "4.2.4", titulo: "Maquininhas (SumUp/Cielo/MP)", concluido: false, expandido: false, filhos: [] }
-          ]
-        },
-        {
-          id: "4.3",
-          titulo: "4.3 Garantias Eletrônicas",
-          concluido: false,
-          expandido: false,
-          filhos: [
-            { id: "4.3.1", titulo: "PDF Certificado + QR Code", concluido: false, expandido: false, filhos: [] },
-            { id: "4.3.2", titulo: "Validação Online", concluido: false, expandido: false, filhos: [] },
-            { id: "4.3.3", titulo: "Regras: Semi-jóias 1a, Perfumes 3m", concluido: false, expandido: false, filhos: [] },
-            { id: "4.3.4", titulo: "Email Automático com Anexo", concluido: false, expandido: false, filhos: [] }
+            { id: "4.2.1", titulo: "Controle Peças Enviadas (Manual)", concluido: false, expandido: false, filhos: [] },
+            { id: "4.2.2", titulo: "Acerto Simplificado (Fora do sistema em MVP)", concluido: false, expandido: false, filhos: [] }
           ]
         }
       ]
@@ -213,43 +192,9 @@ export function getEstruturaInicial() {
           concluido: false,
           expandido: false,
           filhos: [
-            { id: "5.2.1", titulo: "WhatsApp Business API", concluido: false, expandido: false, filhos: [] },
+            { id: "5.2.1", titulo: "Evolution API (WhatsApp Business)", concluido: false, expandido: false, filhos: [] },
             { id: "5.2.2", titulo: "Email Transacional (SMTP)", concluido: false, expandido: false, filhos: [] },
-            { id: "5.2.3", titulo: "Push Notifications", concluido: false, expandido: false, filhos: [] },
-            { id: "5.2.4", titulo: "Templates Automáticos", concluido: false, expandido: false, filhos: [] }
-          ]
-        }
-      ]
-    },
-    {
-      id: "6",
-      titulo: "📱 6. Hardware e Inovação",
-      concluido: false,
-      expandido: false,
-      filhos: [
-        {
-          id: "6.1",
-          titulo: "6.1 Indusales Pay (Smart POS)",
-          concluido: false,
-          expandido: false,
-          filhos: [
-            { id: "6.1.1", titulo: "Tela HD 10 Android/Linux", concluido: false, expandido: false, filhos: [] },
-            { id: "6.1.2", titulo: "Catálogo Digital Integrado", concluido: false, expandido: false, filhos: [] },
-            { id: "6.1.3", titulo: "Leitor NFC/Chip + Impressora 58mm", concluido: false, expandido: false, filhos: [] },
-            { id: "6.1.4", titulo: "Dual Stock (Local/Fábrica)", concluido: false, expandido: false, filhos: [] },
-            { id: "6.1.5", titulo: "Sync Offline-First (SQLite Local)", concluido: false, expandido: false, filhos: [] }
-          ]
-        },
-        {
-          id: "6.2",
-          titulo: "6.2 POS Sync Service",
-          concluido: false,
-          expandido: false,
-          filhos: [
-            { id: "6.2.1", titulo: "WebSocket Socket.io", concluido: false, expandido: false, filhos: [] },
-            { id: "6.2.2", titulo: "Cache Local 72h Offline", concluido: false, expandido: false, filhos: [] },
-            { id: "6.2.3", titulo: "Reconciliação Conflitos", concluido: false, expandido: false, filhos: [] },
-            { id: "6.2.4", titulo: "Rastreamento GPS Anti-fraude", concluido: false, expandido: false, filhos: [] }
+            { id: "5.2.3", titulo: "Templates Automáticos", concluido: false, expandido: false, filhos: [] }
           ]
         }
       ]
@@ -257,19 +202,18 @@ export function getEstruturaInicial() {
     {
       id: "7",
       titulo: "📅 7. Marketing e Calendário",
-      concluido: false,
+      concluido: false, 
       expandido: false,
       filhos: [
         {
           id: "7.1",
-          titulo: "7.1 Calendário Promocional Inteligente",
+          titulo: "7.1 Calendário Promocional (Campanhas)",
           concluido: false,
           expandido: false,
           filhos: [
             { id: "7.1.1", titulo: "Feriados Nacionais Automáticos", concluido: false, expandido: false, filhos: [] },
-            { id: "7.1.2", titulo: "Alertas D-30 (Preparação)", concluido: false, expandido: false, filhos: [] },
-            { id: "7.1.3", titulo: "Cálculo Automático Datas Móveis", concluido: false, expandido: false, filhos: [] },
-            { id: "7.1.4", titulo: "Sugestão Estoque Mínimo", concluido: false, expandido: false, filhos: [] }
+            { id: "7.1.2", titulo: "Alertas D-30 (Preparação de Estoque)", concluido: false, expandido: false, filhos: [] },
+            { id: "7.1.3", titulo: "Cálculo Automático Datas Móveis (Páscoa)", concluido: false, expandido: false, filhos: [] }
           ]
         },
         {
@@ -285,23 +229,12 @@ export function getEstruturaInicial() {
             { id: "7.2.5", titulo: "Dia do Consumidor (15/03)", concluido: false, expandido: false, filhos: [] },
             { id: "7.2.6", titulo: "Páscoa (Móvel) - Família", concluido: false, expandido: false, filhos: [] }
           ]
-        },
-        {
-          id: "7.3",
-          titulo: "7.3 Automação Marketing",
-          concluido: false,
-          expandido: false,
-          filhos: [
-            { id: "7.3.1", titulo: "Geração 3 Variações Posts", concluido: false, expandido: false, filhos: [] },
-            { id: "7.3.2", titulo: "Agendamento Auto D-7, D-3, D-Day", concluido: false, expandido: false, filhos: [] },
-            { id: "7.3.3", titulo: "Integração Social Hub", concluido: false, expandido: false, filhos: [] }
-          ]
         }
       ]
     },
     {
       id: "8",
-      titulo: "🚀 8. Roadmap e Implementação",
+      titulo: "🚀 8. Roadmap e Implementação (Fases)",
       concluido: false,
       expandido: false,
       filhos: [
@@ -314,7 +247,7 @@ export function getEstruturaInicial() {
             { id: "8.1.1", titulo: "approval-svc workflow", concluido: false, expandido: false, filhos: [] },
             { id: "8.1.2", titulo: "RBAC granular por perfil", concluido: false, expandido: false, filhos: [] },
             { id: "8.1.3", titulo: "Tela vínculo Fab-Rev", concluido: false, expandido: false, filhos: [] },
-            { id: "8.1.4", titulo: "Cron bloqueio 120 dias", concluido: false, expandido: false, filhos: [] }
+            { id: "8.1.4", titulo: "Regra inatividade 4 meses", concluido: false, expandido: false, filhos: [] }
           ]
         },
         {
@@ -331,50 +264,35 @@ export function getEstruturaInicial() {
         },
         {
           id: "8.3",
-          titulo: "8.3 Fase 1.3: Fiado e Garantias",
+          titulo: "8.3 Fase 1.3: Catálogo e Marketplace",
           concluido: false,
           expandido: false,
           filhos: [
-            { id: "8.3.1", titulo: "credit-svc engine", concluido: false, expandido: false, filhos: [] },
-            { id: "8.3.2", titulo: "Agendador cobranças", concluido: false, expandido: false, filhos: [] },
-            { id: "8.3.3", titulo: "warranty-svc PDF QR", concluido: false, expandido: false, filhos: [] },
-            { id: "8.3.4", titulo: "Validação QR online", concluido: false, expandido: false, filhos: [] }
+            { id: "8.3.1", titulo: "Diretório público fabricantes", concluido: false, expandido: false, filhos: [] },
+            { id: "8.3.2", titulo: "Sistema de avaliações 0-10", concluido: false, expandido: false, filhos: [] },
+            { id: "8.3.3", titulo: "Matchmaking Fab-Rev", concluido: false, expandido: false, filhos: [] }
           ]
         },
         {
           id: "8.4",
-          titulo: "8.4 Fase 1.4: Estoque Avançado",
+          titulo: "8.4 Fase 1.4: Estoque Básico",
           concluido: false,
           expandido: false,
           filhos: [
             { id: "8.4.1", titulo: "Multi-warehouse cadastro", concluido: false, expandido: false, filhos: [] },
-            { id: "8.4.2", titulo: "Visão consolidada", concluido: false, expandido: false, filhos: [] },
-            { id: "8.4.3", titulo: "reservation-svc Go (TTL 1h)", concluido: false, expandido: false, filhos: [] },
-            { id: "8.4.4", titulo: "Liberação automática Redis", concluido: false, expandido: false, filhos: [] }
+            { id: "8.4.2", titulo: "Visão consolidada", concluido: false, expandido: false, filhos: [] }
           ]
         },
         {
           id: "8.5",
-          titulo: "8.5 Fase 2.2: White Label",
+          titulo: "8.5 Checklist Compliance",
           concluido: false,
           expandido: false,
           filhos: [
-            { id: "8.5.1", titulo: "Sistema score qualidade", concluido: false, expandido: false, filhos: [] },
-            { id: "8.5.2", titulo: "Catálogo unificado multi-fab", concluido: false, expandido: false, filhos: [] },
-            { id: "8.5.3", titulo: "Branding dinâmico", concluido: false, expandido: false, filhos: [] },
-            { id: "8.5.4", titulo: "Logística cross-docking", concluido: false, expandido: false, filhos: [] }
-          ]
-        },
-        {
-          id: "8.6",
-          titulo: "8.6 Checklist Compliance",
-          concluido: false,
-          expandido: false,
-          filhos: [
-            { id: "8.6.1", titulo: "2FA obrigatório admins", concluido: false, expandido: false, filhos: [] },
-            { id: "8.6.2", titulo: "Logs auditoria append-only", concluido: false, expandido: false, filhos: [] },
-            { id: "8.6.3", titulo: "LGPD consentimento", concluido: false, expandido: false, filhos: [] },
-            { id: "8.6.4", titulo: "Isolamento tenant 100%", concluido: false, expandido: false, filhos: [] }
+            { id: "8.5.1", titulo: "2FA obrigatório admins", concluido: false, expandido: false, filhos: [] },
+            { id: "8.5.2", titulo: "Logs auditoria append-only", concluido: false, expandido: false, filhos: [] },
+            { id: "8.5.3", titulo: "LGPD consentimento", concluido: false, expandido: false, filhos: [] },
+            { id: "8.5.4", titulo: "Isolamento tenant 100%", concluido: false, expandido: false, filhos: [] }
           ]
         }
       ]
@@ -383,7 +301,7 @@ export function getEstruturaInicial() {
       id: "9",
       titulo: "📱 9. Social Media Hub (Meta + WhatsApp)",
       concluido: false,
-      expandido: false,
+      expandido: true,
       filhos: [
         {
           id: "9.1",
@@ -437,7 +355,7 @@ export function getEstruturaInicial() {
         },
         {
           id: "9.5",
-          titulo: "9.5 Tecnical Stack Social",
+          titulo: "9.5 Technical Stack Social",
           concluido: false,
           expandido: false,
           filhos: [
@@ -445,6 +363,87 @@ export function getEstruturaInicial() {
             { id: "9.5.2", titulo: "Queue BullMQ (Agendamentos)", concluido: false, expandido: false, filhos: [] },
             { id: "9.5.3", titulo: "Redis (Cache de Imagens/Mídia)", concluido: false, expandido: false, filhos: [] },
             { id: "9.5.4", titulo: "Storage S3 (Assets de Mídia)", concluido: false, expandido: false, filhos: [] }
+          ]
+        }
+      ]
+    },
+    {
+      id: "10",
+      titulo: "🔮 10. Futuro e Expansão (Pós-MVP)",
+      concluido: false,
+      expandido: false,
+      filhos: [
+        {
+          id: "10.1",
+          titulo: "10.1 Smart POS (Indusales Pay)",
+          concluido: false,
+          expandido: false,
+          filhos: [
+            { id: "10.1.1", titulo: "Tela HD 10 Android/Linux", concluido: false, expandido: false, filhos: [] },
+            { id: "10.1.2", titulo: "Catálogo Digital Integrado", concluido: false, expandido: false, filhos: [] },
+            { id: "10.1.3", titulo: "Leitor NFC/Chip + Impressora 58mm", concluido: false, expandido: false, filhos: [] },
+            { id: "10.1.4", titulo: "Dual Stock (Local/Fábrica)", concluido: false, expandido: false, filhos: [] },
+            { id: "10.1.5", titulo: "Sync Offline-First (SQLite Local)", concluido: false, expandido: false, filhos: [] }
+          ]
+        },
+        {
+          id: "10.2",
+          titulo: "10.2 POS Sync Service",
+          concluido: false,
+          expandido: false,
+          filhos: [
+            { id: "10.2.1", titulo: "WebSocket Socket.io", concluido: false, expandido: false, filhos: [] },
+            { id: "10.2.2", titulo: "Cache Local 72h Offline", concluido: false, expandido: false, filhos: [] },
+            { id: "10.2.3", titulo: "Reconciliação Conflitos", concluido: false, expandido: false, filhos: [] },
+            { id: "10.2.4", titulo: "Rastreamento GPS Anti-fraude", concluido: false, expandido: false, filhos: [] }
+          ]
+        },
+        {
+          id: "10.3",
+          titulo: "10.3 Sistema de Fiado (Credit)",
+          concluido: false,
+          expandido: false,
+          filhos: [
+            { id: "10.3.1", titulo: "Limite de Crédito por Cliente", concluido: false, expandido: false, filhos: [] },
+            { id: "10.3.2", titulo: "Prazos: 7, 15, 30 dias", concluido: false, expandido: false, filhos: [] },
+            { id: "10.3.3", titulo: "Parcela Única (Sem Juros)", concluido: false, expandido: false, filhos: [] },
+            { id: "10.3.4", titulo: "Cobrança Auto (D-1, D-Day, D+3, D+7)", concluido: false, expandido: false, filhos: [] },
+            { id: "10.3.5", titulo: "Bloqueio ao Atingir Limite", concluido: false, expandido: false, filhos: [] }
+          ]
+        },
+        {
+          id: "10.4",
+          titulo: "10.4 Reservas TTL Avançado",
+          concluido: false,
+          expandido: false,
+          filhos: [
+            { id: "10.4.1", titulo: "reservation-svc Go (TTL 1h)", concluido: false, expandido: false, filhos: [] },
+            { id: "10.4.2", titulo: "Lock Máx 5 SKUs por Revendedor", concluido: false, expandido: false, filhos: [] },
+            { id: "10.4.3", titulo: "Liberação Automática Redis", concluido: false, expandido: false, filhos: [] },
+            { id: "10.4.4", titulo: "Notificação Fabricante Urgente", concluido: false, expandido: false, filhos: [] }
+          ]
+        },
+        {
+          id: "10.5",
+          titulo: "10.5 Pagamentos Avançados",
+          concluido: false,
+          expandido: false,
+          filhos: [
+            { id: "10.5.1", titulo: "Cartão Crédito (Split)", concluido: false, expandido: false, filhos: [] },
+            { id: "10.5.2", titulo: "Boleto Bancário", concluido: false, expandido: false, filhos: [] },
+            { id: "10.5.3", titulo: "Maquininhas (SumUp/Cielo/MP)", concluido: false, expandido: false, filhos: [] }
+          ]
+        },
+        {
+          id: "10.6",
+          titulo: "10.6 White Label Unificado (Multi-Fabricante)",
+          concluido: false,
+          expandido: false,
+          filhos: [
+            { id: "10.6.1", titulo: "Score Mínimo Participação (8.0)", concluido: false, expandido: false, filhos: [] },
+            { id: "10.6.2", titulo: "Catálogo Unificado Multi-Fabricante", concluido: false, expandido: false, filhos: [] },
+            { id: "10.6.3", titulo: "Embalagens Padronizadas", concluido: false, expandido: false, filhos: [] },
+            { id: "10.6.4", titulo: "Logística Cross-Docking", concluido: false, expandido: false, filhos: [] }
           ]
         }
       ]
